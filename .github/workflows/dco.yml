@@ -1,0 +1,153 @@
+name: DCO
+
+# 每次 push 与 PR 都检查提交的 Signed-off-by 签名。
+# 规则：
+#   1. 每个非合并提交必须带 "Signed-off-by: Name <email>" 尾注
+#   2. 签名的邮箱必须与提交作者或提交者邮箱一致
+#   3. 不接受隐私转发邮箱（*noreply*，如 GitHub/GitLab 的 noreply 地址）
+# 在仓库分支保护里把 signed-off-by 设为必需检查即可强制生效。
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dco-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  signed-off-by:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: 检查 Signed-off-by
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+
+          zero="0000000000000000000000000000000000000000"
+
+          # 计算需要检查的提交范围
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            rev_args=("${PR_BASE_SHA}..${PR_HEAD_SHA}")
+            scope="PR 中新增的提交"
+          elif [ "${PUSH_BEFORE}" != "$zero" ] && git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null; then
+            rev_args=("${PUSH_BEFORE}..${PUSH_AFTER}")
+            scope="本次 push 的提交"
+          elif git rev-parse --verify --quiet "origin/${DEFAULT_BRANCH}" >/dev/null; then
+            # 新建分支：与默认分支分叉点之后的提交
+            rev_args=("origin/${DEFAULT_BRANCH}..${PUSH_AFTER}")
+            scope="新分支相对 ${DEFAULT_BRANCH} 的提交"
+          else
+            rev_args=(-n 1 "${PUSH_AFTER}")
+            scope="本次 push 的最新提交"
+          fi
+
+          echo "检查范围：${scope}（${rev_args[*]}）"
+
+          list=$(mktemp)
+          git rev-list --no-merges "${rev_args[@]}" > "$list"
+          mapfile -t commits < "$list"
+          rm -f "$list"
+          if [ "${#commits[@]}" -eq 0 ]; then
+            echo "没有需要检查的提交"
+            { echo "## DCO"; echo; echo "没有需要检查的提交（${scope}）。"; } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          fail=0
+          report=()
+
+          for sha in "${commits[@]}"; do
+            short=$(git log -1 --format=%h "$sha")
+            subject=$(git log -1 --format=%s "$sha")
+            body=$(git log -1 --format=%B "$sha")
+            author_email=$(git log -1 --format=%ae "$sha" | tr '[:upper:]' '[:lower:]')
+            committer_email=$(git log -1 --format=%ce "$sha" | tr '[:upper:]' '[:lower:]')
+
+            mapfile -t sob_emails < <(
+              printf '%s\n' "$body" \
+                | sed -n 's/^[Ss]igned-off-by:[[:space:]]*.*<\([^<>]*\)>[[:space:]]*$/\1/p' \
+                | tr '[:upper:]' '[:lower:]'
+            )
+
+            problems=()
+
+            if [ "${#sob_emails[@]}" -eq 0 ]; then
+              problems+=("缺少 Signed-off-by 尾注（可用 git commit -s 自动添加）")
+            else
+              matched=0
+              for email in "${sob_emails[@]}"; do
+                if [ "$email" = "$author_email" ] || [ "$email" = "$committer_email" ]; then
+                  matched=1
+                fi
+              done
+              if [ "$matched" -eq 0 ]; then
+                problems+=("Signed-off-by 邮箱需与作者（${author_email}）或提交者（${committer_email}）一致")
+              fi
+              for email in "${sob_emails[@]}"; do
+                case "$email" in
+                  *noreply*) problems+=("Signed-off-by 使用了隐私邮箱 <${email}>，请换成真实邮箱") ;;
+                esac
+              done
+            fi
+
+            case "$author_email" in
+              *noreply*) problems+=("作者邮箱是隐私邮箱 <${author_email}>，请配置真实邮箱后重新提交") ;;
+            esac
+
+            if [ "${#problems[@]}" -eq 0 ]; then
+              echo "OK   ${short} ${subject}"
+            else
+              fail=1
+              echo "FAIL ${short} ${subject}"
+              for p in "${problems[@]}"; do
+                echo "     - ${p}"
+                report+=("| \`${short}\` | ${subject} | ${p} |")
+              done
+            fi
+          done
+
+          {
+            echo "## DCO 检查"
+            echo
+            if [ "$fail" -eq 0 ]; then
+              echo "全部 ${#commits[@]} 个提交（${scope}）签名有效。"
+            else
+              echo "存在未通过检查的提交（${scope}）："
+              echo
+              echo "| 提交 | 标题 | 问题 |"
+              echo "| --- | --- | --- |"
+              printf '%s\n' "${report[@]}"
+              echo
+              echo "修复方式："
+              echo
+              echo '1. 配置真实邮箱（不要用隐私邮箱）：'
+              echo '   ```bash'
+              echo '   git config user.email "you@example.com"'
+              echo '   ```'
+              echo '2. 重新签名为提交添加尾注：'
+              echo '   ```bash'
+              echo '   git commit --amend -s --no-edit          # 最新提交'
+              echo '   git rebase --exec "git commit --amend -s --no-edit" <base>  # 多个提交'
+              echo '   git push --force-with-lease'
+              echo '   ```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$fail"
