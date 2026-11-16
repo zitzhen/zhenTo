@@ -48,17 +48,17 @@ jobs:
 
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: 释放磁盘空间
-        uses: jlumbroso/free-disk-space@main
+        uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6 # v2.0.0
         with:
           android: true
           dotnet: true
           haskell: true
           large-packages: true
           docker-images: true
-          tool-cache: true
+          preinstalled-runtimes: true
           swap-storage: false
 
       - name: 检查磁盘余量
@@ -155,7 +155,7 @@ jobs:
           ls -lh dist
 
       - name: 创建草稿 Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ steps.meta.outputs.tag }}
