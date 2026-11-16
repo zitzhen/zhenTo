@@ -101,20 +101,49 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "版本：${VERSION}"
 
-      - name: 下载基础 ISO
+      - name: 计算基础 ISO 缓存键
+        id: iso-key
         env:
           URL: ${{ steps.meta.outputs.base_url }}
           SHA: ${{ steps.meta.outputs.base_sha }}
         run: |
           set -e
+          key=$(printf '%s|%s' "$URL" "$SHA" | sha256sum | cut -c1-16)
+          echo "key=base-iso-${key}" >> "$GITHUB_OUTPUT"
+
+      - name: 恢复基础 ISO 缓存
+        id: iso-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/cache/base.iso
+          key: ${{ steps.iso-key.outputs.key }}
+
+      - name: 下载基础 ISO
+        env:
+          URL: ${{ steps.meta.outputs.base_url }}
+          SHA: ${{ steps.meta.outputs.base_sha }}
+          CACHE_HIT: ${{ steps.iso-cache.outputs.cache-hit }}
+        run: |
+          set -e
           mkdir -p "$RUNNER_TEMP/cache"
           BASE_ISO="$RUNNER_TEMP/cache/base.iso"
-          curl -fL --retry 3 --retry-delay 5 -o "$BASE_ISO" "$URL"
+          if [ "$CACHE_HIT" = "true" ] && [ -f "$BASE_ISO" ]; then
+            echo "已命中缓存，跳过下载"
+          else
+            curl -fL --retry 3 --retry-delay 5 -o "$BASE_ISO" "$URL"
+          fi
           if [ -n "$SHA" ]; then
             echo "${SHA}  ${BASE_ISO}" | sha256sum -c -
           fi
           ls -lh "$BASE_ISO"
           echo "BASE_ISO=${BASE_ISO}" >> "$GITHUB_ENV"
+
+      - name: 保存基础 ISO 缓存
+        if: steps.iso-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/cache/base.iso
+          key: ${{ steps.iso-key.outputs.key }}
 
       - name: 构建 ISO
         env:
