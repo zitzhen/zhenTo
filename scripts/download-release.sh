@@ -64,7 +64,7 @@ trap 'rm -rf "$WORKDIR"' EXIT INT TERM
 DL_TAG="$TAG"
 export DL_TAG
 RELEASE_JQ='[.[] | select(.tag_name == env.DL_TAG)] | sort_by(.draft) | reverse | .[0] | [.id, .draft] | @tsv'
-if ! gh api "repos/$REPO/releases?per_page=100" --paginate --jq "$RELEASE_JQ" > "$WORKDIR/releases.tsv"; then
+if ! gh api "repos/$REPO/releases?per_page=100" --paginate --jq "$RELEASE_JQ" >"$WORKDIR/releases.tsv"; then
     fail "获取发行版列表失败（仓库 $REPO）。"
 fi
 
@@ -75,7 +75,7 @@ while IFS="$TAB" read -r id draft; do
         if [ -z "$FIRST_ID" ]; then FIRST_ID=$id; fi
         if [ "$draft" = "true" ] && [ -z "$DRAFT_ID" ]; then DRAFT_ID=$id; fi
     fi
-done < "$WORKDIR/releases.tsv"
+done <"$WORKDIR/releases.tsv"
 
 RELEASE_ID=$FIRST_ID
 IS_DRAFT=false
@@ -96,11 +96,11 @@ OUTDIR=$(cd "$OUTDIR" && pwd)
 
 # 5. 附件列表
 if ! gh api "repos/$REPO/releases/$RELEASE_ID/assets?per_page=100" --paginate \
-        --jq '.[] | [.id, .name, .size] | @tsv' > "$WORKDIR/assets.tsv"; then
+    --jq '.[] | [.id, .name, .size] | @tsv' >"$WORKDIR/assets.tsv"; then
     fail "获取发行版附件列表失败（release id: $RELEASE_ID）。"
 fi
 
-TOTAL=$(wc -l < "$WORKDIR/assets.tsv" | tr -d ' ')
+TOTAL=$(wc -l <"$WORKDIR/assets.tsv" | tr -d ' ')
 [ "$TOTAL" -gt 0 ] || fail "发行版 $TAG 没有可下载的附件。"
 
 if [ "$IS_DRAFT" = "true" ]; then KIND='草稿'; else KIND='已发布'; fi
@@ -117,8 +117,8 @@ while IFS="$TAB" read -r asset_id asset_name asset_size; do
     printf '[%s/%s] %s (%s bytes) ... ' "$INDEX" "$TOTAL" "$asset_name" "$asset_size"
 
     if gh api "repos/$REPO/releases/assets/$asset_id" \
-            -H "Accept: application/octet-stream" > "$OUTDIR/$asset_name" 2>"$WORKDIR/err"; then
-        ACTUAL=$(wc -c < "$OUTDIR/$asset_name" | tr -d ' ')
+        -H "Accept: application/octet-stream" >"$OUTDIR/$asset_name" 2>"$WORKDIR/err"; then
+        ACTUAL=$(wc -c <"$OUTDIR/$asset_name" | tr -d ' ')
         if [ "$asset_size" != "$ACTUAL" ]; then
             rm -f "$OUTDIR/$asset_name"
             echo "失败: 文件大小不一致（期望 $asset_size，实际 $ACTUAL）"
@@ -128,9 +128,9 @@ while IFS="$TAB" read -r asset_id asset_name asset_size; do
         fi
     else
         rm -f "$OUTDIR/$asset_name"
-        echo "失败: $(tr -d '\r' < "$WORKDIR/err" | head -n 1)"
+        echo "失败: $(tr -d '\r' <"$WORKDIR/err" | head -n 1)"
     fi
-done < "$WORKDIR/assets.tsv"
+done <"$WORKDIR/assets.tsv"
 
 echo ""
 echo "下载完成: $SUCCESS/$TOTAL -> $OUTDIR"
