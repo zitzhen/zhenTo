@@ -17,7 +17,7 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 curl -fL -o "$WORK_DIR/$SNAP_FILE" "$BASE_URL/$SNAP_FILE"
 curl -fL -o "$WORK_DIR/$SNAP_FILE.sha256" "$BASE_URL/$SNAP_FILE.sha256"
 
-( cd "$WORK_DIR" && sha256sum -c "$SNAP_FILE.sha256" )
+(cd "$WORK_DIR" && sha256sum -c "$SNAP_FILE.sha256")
 
 if snap list ubuntu-desktop-bootstrap >/dev/null 2>&1; then
     snap remove ubuntu-desktop-bootstrap
