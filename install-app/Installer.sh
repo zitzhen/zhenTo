@@ -8,8 +8,11 @@
 
 set -e
 
+# 依赖脚本按自身所在目录定位，避免调用方 cwd 不是本目录时找不到
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+
 # Dependent projects
-./curl.sh
+sh "$SCRIPT_DIR/curl.sh"
 
 VERSION="1.0.0"
 SNAP_FILE="ubuntu-desktop-bootstrap_${VERSION}-1-g21e8ae6a1_amd64.snap"
