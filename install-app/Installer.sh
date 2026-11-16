@@ -8,6 +8,9 @@
 
 set -e
 
+# Dependent projects
+./curl.sh
+
 VERSION="1.0.0"
 SNAP_FILE="ubuntu-desktop-bootstrap_${VERSION}-1-g21e8ae6a1_amd64.snap"
 BASE_URL="https://github.com/zitzhen/zhento-desktop-install/releases/download/v${VERSION}"
