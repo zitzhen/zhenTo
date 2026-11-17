@@ -5,6 +5,7 @@ name: DCO
 #   1. Every non-merge commit must carry a "Signed-off-by: Name <email>" trailer
 #   2. The sign-off email must match the commit author or committer email
 #   3. Privacy forwarding emails (*noreply*, e.g. GitHub/GitLab noreply addresses) are not allowed
+#   4. Exception: Dependabot's author email + support@github.com sign-off is allowed
 # Mark signed-off-by as a required check in branch protection to enforce it.
 
 on:
@@ -41,6 +42,11 @@ jobs:
           set -euo pipefail
 
           zero="0000000000000000000000000000000000000000"
+
+          # Dependabot commits use a GitHub noreply author address and sign off
+          # with support@github.com. Allow exactly this pair as an exception.
+          dependabot_author="49699333+dependabot[bot]@users.noreply.github.com"
+          dependabot_signoff="support@github.com"
 
           # Compute the commit range to check
           if [ "$EVENT_NAME" = "pull_request" ]; then
@@ -93,7 +99,8 @@ jobs:
             else
               matched=0
               for email in "${sob_emails[@]}"; do
-                if [ "$email" = "$author_email" ] || [ "$email" = "$committer_email" ]; then
+                if [ "$email" = "$author_email" ] || [ "$email" = "$committer_email" ] \
+                  || { [ "$author_email" = "$dependabot_author" ] && [ "$email" = "$dependabot_signoff" ]; }; then
                   matched=1
                 fi
               done
@@ -108,6 +115,7 @@ jobs:
             fi
 
             case "$author_email" in
+              "$dependabot_author") ;;
               *noreply*) problems+=("Author email is a privacy email <${author_email}>, please configure a real email and re-commit") ;;
             esac
 
