@@ -5,6 +5,7 @@ out/
 
 # Ignore all ISO files
 *.iso
+*.z03
 *.z02
 *.z01
 *.sha256
