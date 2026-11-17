@@ -8,5 +8,6 @@ out/
 *.z03
 *.z02
 *.z01
+*.zip
 *.sha256
 SHA256SUMS
