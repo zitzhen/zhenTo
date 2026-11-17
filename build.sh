@@ -6,7 +6,10 @@
 # ZhenTo ISO build script (UEFI-only, no longer depends on Cubic)
 #
 #   sudo ./build.sh              Unpack official ISO -> install APPs in chroot -> repack -> output ISO
-#   sudo ./build.sh --apps-only  Run install-app/*.sh only (inside chroot or on a real system)
+#   sudo ./build.sh --apps-only  Provision apt + run install-app/*.sh (inside chroot or on a real system)
+#
+# Preinstalled APPs are declared in install-app/manifest.conf (apt sources and packages);
+# install-app/*.sh hold only the per-app customisation that is not plain apt install.
 #
 # Overridable environment variables:
 #   BASE_ISO       Base ISO (default /home/oliver/iso/ubuntu-26.04.1-desktop-amd64.iso)
@@ -64,23 +67,67 @@ if [ "${#VOLID}" -gt 32 ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Preinstall APPs: run scripts under install-app/ on a real system or inside chroot
+# Preinstall APPs: provision everything in one pass, then run the per-app
+# customisation scripts. Works on a real system or inside chroot.
+#
+# The apt layer is declared in install-app/manifest.conf:
+#   APT_REPOS     third-party sources to register (e.g. ppa:owner/name)
+#   APT_PACKAGES  packages installed in a single apt-get install
+# This replaces the old pattern where every install-app/*.sh ran its own
+# "apt-get update && apt-get install", refreshing the index several times.
 # ---------------------------------------------------------------------------
 install_apps() {
-    local app
-    local found=0
+    local app repo found=0 add_repo_flag=""
+    local manifest="$SELF_DIR/install-app/manifest.conf"
 
     cd "$SELF_DIR"
     echo "==> Installing preinstalled applications..."
 
+    # Defaults first so the sourced manifest is safe under `set -u`.
+    APT_REPOS=()
+    APT_PACKAGES=()
+    [ -f "$manifest" ] || die "Missing $manifest"
+    # shellcheck source=/dev/null
+    . "$manifest"
+
+    # ---- apt layer: register sources, refresh ONCE, install all packages ONCE ----
+    if [ "${#APT_REPOS[@]}" -gt 0 ]; then
+        command -v add-apt-repository >/dev/null 2>&1 ||
+            die "add-apt-repository is required (install software-properties-common)"
+        # Prefer -n so registering sources does not refresh the index by itself;
+        # older versions lack it and will refresh, which is still correct.
+        if add-apt-repository --help 2>&1 | grep -q -- '--no-update'; then
+            add_repo_flag="-n"
+        fi
+        echo "==> Registering apt sources (${#APT_REPOS[@]}): ${APT_REPOS[*]}"
+        for repo in "${APT_REPOS[@]}"; do
+            # shellcheck disable=SC2086
+            add-apt-repository -y $add_repo_flag "$repo" ||
+                die "Failed to add apt source: $repo"
+        done
+    fi
+
+    if [ "${#APT_REPOS[@]}" -gt 0 ] || [ "${#APT_PACKAGES[@]}" -gt 0 ]; then
+        echo "==> apt-get update (single pass)"
+        apt-get update || die "apt-get update failed"
+    fi
+
+    if [ "${#APT_PACKAGES[@]}" -gt 0 ]; then
+        echo "==> apt-get install (${#APT_PACKAGES[@]} packages): ${APT_PACKAGES[*]}"
+        apt-get install -y --no-install-recommends "${APT_PACKAGES[@]}" ||
+            die "apt-get install failed"
+    fi
+
+    # ---- customisation layer: per-app scripts, no apt operations ----
+    echo "==> Running app customisation scripts..."
     for app in install-app/*.sh; do
         [ -e "$app" ] || continue
         found=1
         echo "==> Running ${app}"
-        sh "$app"
+        sh "$app" || die "Failed: $app"
     done
 
-    [ "$found" -eq 1 ] || echo "==> No scripts under install-app/"
+    [ "$found" -eq 1 ] || echo "==> No customisation scripts under install-app/"
     echo "==> All applications installed."
 }
 

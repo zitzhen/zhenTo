@@ -8,12 +8,8 @@
 
 set -e
 
-# Locate dependent scripts by the script's own directory, so they are still found
-# when the caller's cwd is not this directory.
-SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-
-# Dependent projects
-sh "$SCRIPT_DIR/curl.sh"
+# curl is installed centrally by build.sh via install-app/manifest.conf, so it is
+# available here both during the build (chroot) and on a real system.
 
 VERSION="1.0.0"
 SNAP_FILE="ubuntu-desktop-bootstrap_${VERSION}-1-g21e8ae6a1_amd64.snap"
