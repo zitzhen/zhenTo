@@ -60,6 +60,10 @@ const NEW_LABELS = {
     color: 'c2e0c6',
     description: 'GRUB and boot configuration',
   },
+  hook: {
+    color: 'ac0b99',
+    description: 'Git hooks under .githooks/',
+  },
 };
 
 /** Chinese conventional-commit style prefixes seen in this repo's history. */
@@ -152,14 +156,19 @@ function computeLabels({ title = '', body = '', files = [], author = '', isPR = 
         labels.add('build-system');
       }
       if (p.startsWith('scripts/')) labels.add('scripts');
+      if (p.startsWith('.githooks/')) labels.add('hook');
       if (p === 'readme.md' || p.startsWith('docs/') || p.endsWith('.md')) {
         labels.add('documentation');
       }
     }
   }
 
-  // Localization can be the real intent even under a chore(scripts) scope
-  if (/i18n|l10n|localiz|internationaliz|translat|本地化|国际化|翻译|英文化/.test(text)) {
+  // The Chinese PR template hardcodes "i18n 国际化 / 本地化" in every body, so a
+  // body-wide keyword match tags every hook PR as i18n. For PRs whose changes
+  // live entirely under .githooks/, ignore that signal (an explicit i18n: /
+  // l10n: title type above still wins).
+  const hookOnly = isPR && files.length > 0 && files.every((raw) => String(raw).toLowerCase().startsWith('.githooks/'));
+  if (!hookOnly && /i18n|l10n|localiz|internationaliz|translat|本地化|国际化|翻译|英文化/.test(text)) {
     labels.add('i18n');
   }
 
