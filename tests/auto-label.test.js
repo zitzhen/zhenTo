@@ -89,6 +89,43 @@ test('localization intent wins even under a chore(scripts) scope', () => {
   assert.ok(labels.includes('i18n'));
 });
 
+test('.githooks/ paths are labeled hook', () => {
+  const labels = computeLabels({
+    title: 'chore: tweak commit-msg hook',
+    isPR: true,
+    files: ['.githooks/commit-msg'],
+  });
+  assert.ok(labels.includes('hook'));
+  // The hook label is a path rule, not an Issue free-text rule.
+  assert.ok(!computeLabels({ title: 'hook related discussion', isPR: false }).includes('hook'));
+});
+
+test('hook-only PR ignores the i18n boilerplate baked into the PR template', () => {
+  // The PR template hardcodes "i18n" in every body. PR #29 (feat(hooks) +
+  // .githooks/commit-msg) was wrongly tagged i18n by this.
+  const templateBody = '- [ ] `i18n` internationalization / localization';
+  const labels = computeLabels({
+    title: 'feat(hooks): add commit-msg hook to auto-add DCO sign-off',
+    body: templateBody,
+    isPR: true,
+    files: ['.githooks/commit-msg'],
+  });
+  assert.ok(labels.includes('hook'));
+  assert.ok(labels.includes('enhancement'));
+  assert.ok(!labels.includes('i18n'));
+});
+
+test('mixed PR touching .githooks/ and real i18n files still gets i18n', () => {
+  const labels = computeLabels({
+    title: 'chore: hooks plus translation',
+    body: 'update translation strings',
+    isPR: true,
+    files: ['.githooks/commit-msg', 'i18n/zh_CN.js'],
+  });
+  assert.ok(labels.includes('hook'));
+  assert.ok(labels.includes('i18n'));
+});
+
 test('empty input falls back to triage; output is sorted and unique', () => {
   assert.deepEqual(computeLabels({}), ['triage']);
   const labels = computeLabels({ title: 'ci: i18n', isPR: true, files: ['.github/workflows/a.yml'] });
@@ -97,7 +134,7 @@ test('empty input falls back to triage; output is sorted and unique', () => {
 });
 
 test('NEW_LABELS covers labels the workflow may create', () => {
-  for (const name of ['triage', 'ci', 'chore', 'boot', 'build-system', 'installer', 'scripts', 'i18n']) {
+  for (const name of ['triage', 'ci', 'chore', 'boot', 'build-system', 'installer', 'scripts', 'i18n', 'hook']) {
     assert.ok(Object.hasOwn(NEW_LABELS, name), `missing NEW_LABELS entry: ${name}`);
   }
 });

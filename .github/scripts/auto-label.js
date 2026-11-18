@@ -163,7 +163,7 @@ function computeLabels({ title = '', body = '', files = [], author = '', isPR = 
     }
   }
 
-  // The Chinese PR template hardcodes "i18n 国际化 / 本地化" in every body, so a
+  // The zh-CN PR template hardcodes the i18n option in every body, so a
   // body-wide keyword match tags every hook PR as i18n. For PRs whose changes
   // live entirely under .githooks/, ignore that signal (an explicit i18n: /
   // l10n: title type above still wins).
