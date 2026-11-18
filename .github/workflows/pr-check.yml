@@ -58,6 +58,9 @@ jobs:
       - name: DCO check regression tests
         run: bash tests/dco-check.test.sh
 
+      - name: CONTRIBUTORS generator tests
+        run: bash tests/update-contributors.test.sh
+
       - name: shellcheck
         run: |
           set -e

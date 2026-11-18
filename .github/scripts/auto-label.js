@@ -64,6 +64,10 @@ const NEW_LABELS = {
     color: 'ac0b99',
     description: 'Git hooks under .githooks/',
   },
+  CONTRIBUTORS: {
+    color: '5319e7',
+    description: 'Sign-off added or CONTRIBUTORS updated',
+  },
 };
 
 /** Chinese conventional-commit style prefixes seen in this repo's history. */
@@ -147,6 +151,7 @@ function computeLabels({ title = '', body = '', files = [], author = '', isPR = 
         labels.add('ci');
       }
       if (p === '.gitignore') labels.add('gitignore');
+      if (p === 'contributors') labels.add('CONTRIBUTORS');
       if (p.startsWith('install-app/')) {
         labels.add('installer');
         if (type === 'feat' || type === 'feature') labels.add('new-app');

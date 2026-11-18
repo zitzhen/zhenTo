@@ -175,6 +175,7 @@ See [tests/README.md](tests/README.md) for details and safety notes.
 | `build-iso.yml` | `v*` tag or manual dispatch | Preflight → build → verify → split → publish a draft release |
 | `vm-smoke.yml` | `v*` tag or manual dispatch | Advisory QEMU + OVMF boot check (`continue-on-error`) |
 | `auto-label.yml` | PR activity | Automatic labeling |
+| `contributors.yml` | PR merged | Rebuild `CONTRIBUTORS` from all `Signed-off-by` trailers and label the merged PR |
 
 ## Contributing
 
@@ -187,7 +188,7 @@ See [tests/README.md](tests/README.md) for details and safety notes.
    git commit -s -m "feat: describe your change"
    ```
 
-   The sign-off email must match your commit author/committer email and must not be a GitHub `noreply` address.
+   The sign-off email must match your commit author/committer email and must not be a GitHub `noreply` address. `CONTRIBUTORS` is rebuilt from these trailers automatically after each merge — do not edit it by hand.
 5. Open a pull request. Choose the [English](.github/PULL_REQUEST_TEMPLATE/english.md) or [Chinese](.github/PULL_REQUEST_TEMPLATE/chinese.md) template, and make sure all required checks pass.
 
 Bug reports and feature requests are welcome via the issue templates in `.github/ISSUE_TEMPLATE/`.

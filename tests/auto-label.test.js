@@ -74,6 +74,13 @@ test('PR file paths add area labels', () => {
   assert.ok(!issue.includes('build-system'));
 });
 
+test('CONTRIBUTORS file changes get the CONTRIBUTORS label (PR only)', () => {
+  const labels = computeLabels({ title: 'chore: refresh credits', isPR: true, files: ['CONTRIBUTORS'] });
+  assert.ok(labels.includes('CONTRIBUTORS'));
+  // Path rule must not leak into Issues.
+  assert.ok(!computeLabels({ title: 'discuss CONTRIBUTORS', isPR: false, files: ['CONTRIBUTORS'] }).includes('CONTRIBUTORS'));
+});
+
 test('new-app requires both feat type and install-app path', () => {
   const labels = computeLabels({
     title: 'feat: install ripgrep',
@@ -134,7 +141,7 @@ test('empty input falls back to triage; output is sorted and unique', () => {
 });
 
 test('NEW_LABELS covers labels the workflow may create', () => {
-  for (const name of ['triage', 'ci', 'chore', 'boot', 'build-system', 'installer', 'scripts', 'i18n', 'hook']) {
+  for (const name of ['triage', 'ci', 'chore', 'boot', 'build-system', 'installer', 'scripts', 'i18n', 'hook', 'CONTRIBUTORS']) {
     assert.ok(Object.hasOwn(NEW_LABELS, name), `missing NEW_LABELS entry: ${name}`);
   }
 });

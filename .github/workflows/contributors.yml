@@ -1,0 +1,68 @@
+name: Contributors
+
+# After a PR is merged, rebuild CONTRIBUTORS from the Signed-off-by trailers in
+# the whole history and tag the merged PR with the CONTRIBUTORS label.
+#
+# The commit is pushed with GITHUB_TOKEN, so it does not start another workflow
+# run (no DCO / auto-label loop). Serialized per base branch so two quick merges
+# cannot race on the same file.
+#
+# pull_request_target keeps write permissions even for merged fork PRs. Only the
+# base branch is checked out and executed, never the PR's working tree.
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: contributors-${{ github.event.pull_request.base.ref }}
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout base branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          fetch-depth: 0
+
+      - name: Rebuild CONTRIBUTORS from Signed-off-by
+        id: rebuild
+        run: bash .github/scripts/update-contributors.sh
+
+      - name: Commit CONTRIBUTORS if changed
+        if: steps.rebuild.outputs.changed == '1'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config commit.gpgsign false
+          git add CONTRIBUTORS
+          git commit -m "chore: update CONTRIBUTORS from Signed-off-by"
+          git push origin "HEAD:${BASE_REF}"
+
+      - name: Label the merged PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -e
+          if ! gh api "repos/${GITHUB_REPOSITORY}/labels/CONTRIBUTORS" >/dev/null 2>&1; then
+            gh api "repos/${GITHUB_REPOSITORY}/labels" \
+              --field name=CONTRIBUTORS \
+              --field color=5319e7 \
+              --field description="Sign-off added or CONTRIBUTORS updated" >/dev/null
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/labels" \
+            --method POST --field 'labels[]=CONTRIBUTORS' >/dev/null
