@@ -113,6 +113,30 @@ if [ "${1:-}" = "--check" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# remove App
+# ---------------------------------------------------------------------------
+
+remove_apps() {
+    local app
+    local found=0
+
+    cd "$SELF_DIR"
+    echo "==> remove preinstalled applications..."
+
+    for app in remove-app/*.sh; do
+        [ -e "$app" ] || continue
+        found=1
+        echo "==> Running ${app}"
+        sh "$app"
+    done
+
+    [ "$found" -eq 1 ] || echo "==> No scripts under remove-app/"
+    echo "==> All applications remove."
+}
+
+remove_apps
+
+# ---------------------------------------------------------------------------
 # install PPA repositories
 # ---------------------------------------------------------------------------
 install_ppa_repositories() {
