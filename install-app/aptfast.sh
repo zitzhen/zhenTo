@@ -4,7 +4,8 @@
 # App-Maintainer: freedom-323 <long.hummingbird.wivo@mask.me>
 # App-URL: https://launchpad.net/apt-fast/
 # OS-repository: https://github.com/ilikenwf/apt-fast
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: AGPL-3.0-only
+# App-License: GPL-3.0-only
 
 set -e
 
