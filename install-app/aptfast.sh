@@ -9,5 +9,4 @@
 set -e
 
 add-apt-repository ppa:apt-fast/stable
-apt-get update
 apt-get -y install apt-fast
