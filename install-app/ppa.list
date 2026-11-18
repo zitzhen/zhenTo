@@ -8,3 +8,9 @@
 # Maintainer: Oliver Lin <oliver@liuxiaozhen.dev>
 ppa:zitzhen/patchsplit
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Author: Oliver Lin <oliver@Liuxiaozhenn.dev>
+# Maintainer: freedom-323 <long.hummingbird.wivo@mask.me>
+ppa:apt-fast/stable
+# ---------------------------------------------------------------------------
