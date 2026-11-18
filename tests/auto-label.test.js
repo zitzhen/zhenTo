@@ -60,13 +60,14 @@ test('PR file paths add area labels', () => {
     files: [
       '.github/workflows/pr-check.yml',
       'install-app/git.sh',
+      'remove-app/firefox.sh',
       'edit-grub/grub.cfg',
       'build.sh',
       'scripts/download-release.sh',
       'README.md',
     ],
   });
-  for (const expected of ['ci', 'github_actions', 'installer', 'boot', 'build-system', 'scripts', 'documentation']) {
+  for (const expected of ['ci', 'github_actions', 'installer', 'remove-app', 'boot', 'build-system', 'scripts', 'documentation']) {
     assert.ok(labels.includes(expected), `expected label: ${expected}`);
   }
   // Area labels from paths must not leak into Issues.
@@ -89,6 +90,19 @@ test('new-app requires both feat type and install-app path', () => {
   });
   assert.ok(labels.includes('new-app'));
   assert.ok(!computeLabels({ title: 'fix: install ripgrep', isPR: true, files: ['install-app/ripgrep.sh'] }).includes('new-app'));
+});
+
+test('remove-app/ paths get the remove-app label (PR only)', () => {
+  const labels = computeLabels({
+    title: 'chore: drop bundled firefox',
+    isPR: true,
+    files: ['remove-app/firefox.sh'],
+  });
+  assert.ok(labels.includes('remove-app'));
+  // Removal scripts are not installers.
+  assert.ok(!labels.includes('installer'));
+  // Path rule must not leak into Issues.
+  assert.ok(!computeLabels({ title: 'discuss remove-app', isPR: false, files: ['remove-app/firefox.sh'] }).includes('remove-app'));
 });
 
 test('localization intent wins even under a chore(scripts) scope', () => {
@@ -141,7 +155,7 @@ test('empty input falls back to triage; output is sorted and unique', () => {
 });
 
 test('NEW_LABELS covers labels the workflow may create', () => {
-  for (const name of ['triage', 'ci', 'chore', 'boot', 'build-system', 'installer', 'scripts', 'i18n', 'hook', 'CONTRIBUTORS']) {
+  for (const name of ['triage', 'ci', 'chore', 'boot', 'build-system', 'installer', 'remove-app', 'scripts', 'i18n', 'hook', 'CONTRIBUTORS']) {
     assert.ok(Object.hasOwn(NEW_LABELS, name), `missing NEW_LABELS entry: ${name}`);
   }
 });

@@ -44,6 +44,10 @@ const NEW_LABELS = {
     color: 'bfd4f2',
     description: 'Installer and install-app scripts',
   },
+  'remove-app': {
+    color: 'ffd6d6',
+    description: 'App removal scripts under remove-app/',
+  },
   'build-system': {
     color: 'f9d0c4',
     description: 'ISO build scripts and build configuration',
@@ -156,6 +160,7 @@ function computeLabels({ title = '', body = '', files = [], author = '', isPR = 
         labels.add('installer');
         if (type === 'feat' || type === 'feature') labels.add('new-app');
       }
+      if (p.startsWith('remove-app/')) labels.add('remove-app');
       if (p.startsWith('edit-grub/')) labels.add('boot');
       if (p.startsWith('edit-os-release/') || p === 'build.sh' || p.endsWith('/manifest.conf')) {
         labels.add('build-system');
