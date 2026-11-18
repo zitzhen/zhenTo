@@ -55,6 +55,9 @@ jobs:
       - name: Version consistency
         run: bash tests/check-version-consistency.sh
 
+      - name: DCO check regression tests
+        run: bash tests/dco-check.test.sh
+
       - name: shellcheck
         run: |
           set -e

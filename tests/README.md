@@ -4,7 +4,7 @@
 
 | 层 | 文件 | 运行方式 | 前置条件 | 是否阻断 PR |
 |---|---|---|---|---|
-| PR 快检 / 单测 | `auto-label.test.js`、`check-version-consistency.sh` | `node --test tests/*.test.js`、`bash tests/check-version-consistency.sh` | Node.js 22+；无 root、无网络 | 是 |
+| PR 快检 / 单测 | `auto-label.test.js`、`dco-check.test.sh`、`check-version-consistency.sh` | `node --test tests/*.test.js`、`bash tests/dco-check.test.sh`、`bash tests/check-version-consistency.sh` | Node.js 22+；git、bash；无网络 | 是 |
 | 构建前预检 | `preflight.test.sh` | `bash tests/preflight.test.sh` | bash；无 root、无网络（外部命令用 fake bin mock） | 是 |
 | 构建后产物验收 | `verify-artifact.sh` | `bash tests/verify-artifact.sh <iso> <version>` | `xorriso`、`unsquashfs`、`md5sum`、`sha256sum` | 否（在 build job 内阻断构建） |
 | VM 启动冒烟 | `vm-smoke.sh` | `bash tests/vm-smoke.sh <iso> [超时秒数]` | `qemu-system-x86_64`、OVMF | 否（advisory） |
@@ -14,6 +14,7 @@
 ```bash
 node --test tests/*.test.js
 bash tests/check-version-consistency.sh
+bash tests/dco-check.test.sh
 bash tests/preflight.test.sh
 ```
 
