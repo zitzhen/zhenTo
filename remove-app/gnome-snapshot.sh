@@ -5,4 +5,5 @@
 
 set -e
 
+# GNOME Camera
 apt remove --autoremove gnome-snapshot -y
