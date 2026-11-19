@@ -89,7 +89,14 @@ preflight_checks() {
     [ "$avail_gb" -ge 25 ] || die "Not enough disk space: ${avail_gb}G available (need >= 25G)"
 
     local f
-    for f in "$SELF_DIR/edit-os-release/edit.sh" "$SELF_DIR/edit-grub/replace-grub.sh" "$SELF_DIR/install-app/ppa.list"; do
+    for f in \
+        "$SELF_DIR/edit-os-release/edit.sh" \
+        "$SELF_DIR/edit-grub/replace-grub.sh" \
+        "$SELF_DIR/edit-hostname/edit-hostname.sh" \
+        "$SELF_DIR/edit-hostname/hostname" \
+        "$SELF_DIR/edit-hosts/edit-hosts.sh" \
+        "$SELF_DIR/edit-hosts/hosts" \
+        "$SELF_DIR/install-app/ppa.list"; do
         [ -f "$f" ] || die "Missing build input: $f"
     done
 
@@ -341,6 +348,35 @@ apply_os_release() {
 }
 
 # ---------------------------------------------------------------------------
+# Host identity: write /etc/hostname and /etc/hosts into the unpacked root.
+# The scripts take an explicit target path, so they run on the host against
+# $ROOT_DIR and never get copied into the chroot or shipped in the final image.
+# ---------------------------------------------------------------------------
+apply_hostname() {
+    local src="$SELF_DIR/edit-hostname/edit-hostname.sh"
+
+    [ -f "$src" ] || {
+        warn "edit-hostname/edit-hostname.sh is missing, skipping hostname"
+        return 0
+    }
+
+    log "Writing /etc/hostname"
+    sh "$src" "$ROOT_DIR/etc/hostname" || die "Failed to write /etc/hostname"
+}
+
+apply_hosts() {
+    local src="$SELF_DIR/edit-hosts/edit-hosts.sh"
+
+    [ -f "$src" ] || {
+        warn "edit-hosts/edit-hosts.sh is missing, skipping hosts"
+        return 0
+    }
+
+    log "Writing /etc/hosts"
+    sh "$src" "$ROOT_DIR/etc/hosts" || die "Failed to write /etc/hosts"
+}
+
+# ---------------------------------------------------------------------------
 # Boot menu: replace boot/grub/grub.cfg in the ISO tree with the config from edit-grub/
 # ---------------------------------------------------------------------------
 apply_grub() {
@@ -445,6 +481,8 @@ patch_layer() {
         /bin/bash /opt/zhento-build/build.sh --apps-only
 
     apply_os_release
+    apply_hostname
+    apply_hosts
 
     log "Cleaning up build-time artifacts"
     rm -rf "$ROOT_DIR/opt/zhento-build"
