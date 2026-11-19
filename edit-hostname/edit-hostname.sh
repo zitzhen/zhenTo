@@ -27,10 +27,10 @@ fi
 # The shipped hostname file has no trailing newline; read the first line and validate it.
 name=$(sed -n '1p' hostname | tr -d '\r\n')
 case "$name" in
-    ''|*[!A-Za-z0-9-]*|-*|*-*)
-        echo "Invalid hostname in hostname: $name" >&2
-        exit 1
-        ;;
+'' | *[!A-Za-z0-9-]* | -* | *-*)
+    echo "Invalid hostname in hostname: $name" >&2
+    exit 1
+    ;;
 esac
 if [ "${#name}" -gt 63 ]; then
     echo "Hostname too long (max 63 chars): $name" >&2
