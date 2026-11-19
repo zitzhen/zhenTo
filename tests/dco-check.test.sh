@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Regression tests for .github/scripts/dco-check.sh.
-# Covers the maintainer-rebase case: the contributor's author email is a
-# GitHub/GitLab noreply address while the committer becomes the maintainer.
+# Covers the maintainer-rebase case, the noreply rejections, and the fixed
+# author/sign-off pairs allowed for automation accounts.
 
 set -euo pipefail
 
@@ -86,7 +86,7 @@ check_case "noreply author not matching PR author still fails" 1
 
 printf '%s' "$noreply_signoff" >"$msg"
 make_case noreply_signoff "$noreply_author" "$maintainer" "$msg" freedom-323
-check_case "noreply sign-off is always rejected" 1
+check_case "human noreply sign-off is rejected" 1
 
 printf '%s' "$plain_msg" >"$msg"
 make_case missing_signoff "$noreply_author" "$maintainer" "$msg" freedom-323
@@ -103,6 +103,16 @@ check_case "sign-off matching neither author nor committer fails" 1
 printf '%s' $'Topic\n\nSigned-off-by: dependabot[bot] <support@github.com>\n' >"$msg"
 make_case dependabot "49699333+dependabot[bot]@users.noreply.github.com" "$maintainer" "$msg" dependabot
 check_case "dependabot exception still passes" 0
+
+bot_author="358577549+zhento-bot[bot]@users.noreply.github.com"
+
+printf '%s' $'Topic\n\nSigned-off-by: zhento[bot] <zhento-bot-noreply@zit.email>\n' >"$msg"
+make_case zhento_bot "$bot_author" "$bot_author" "$msg" zhento-bot
+check_case "zhento-bot service sign-off passes" 0
+
+printf '%s' $'Topic\n\nSigned-off-by: zhento[bot] <wrong@example.com>\n' >"$msg"
+make_case zhento_bot_wrong "$bot_author" "$bot_author" "$msg" zhento-bot
+check_case "zhento-bot with a different sign-off fails" 1
 
 printf '\n%s passed, %s failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ]

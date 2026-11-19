@@ -1,12 +1,14 @@
 name: Contributors
 
 # After a PR is merged, rebuild CONTRIBUTORS from the Signed-off-by trailers in
-# the whole history and tag the merged PR with the CONTRIBUTORS label.
+# the whole history and open a PR with the update. Branch protection requires
+# changes to main to go through a PR with a passing "signed-off-by" check.
 #
-# The commit is pushed with GITHUB_TOKEN, so it does not start another workflow
-# run (no DCO / auto-label loop). Serialized per base branch so two quick merges
-# cannot race on the same file.
+# The PR is opened with a GitHub App installation token (not GITHUB_TOKEN), so
+# its checks run immediately without the "approval-required" state. The commit
+# is authored by the same App with a service Signed-off-by trailer.
 #
+# The PR is assigned to and reviewed by MAINTAINER.
 # pull_request_target keeps write permissions even for merged fork PRs. Only the
 # base branch is checked out and executed, never the PR's working tree.
 
@@ -23,6 +25,12 @@ concurrency:
   group: contributors-${{ github.event.pull_request.base.ref }}
   cancel-in-progress: false
 
+env:
+  MAINTAINER: iamliuxiaozhen
+  BOT_NAME: "zhento[bot]"
+  BOT_EMAIL: "358577549+zhento-bot[bot]@users.noreply.github.com"
+  BOT_SIGNOFF: "zhento[bot] <zhento-bot-noreply@zit.email>"
+
 jobs:
   update:
     if: github.event.pull_request.merged == true
@@ -34,28 +42,68 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.ref }}
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Create GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE }}
+          installation-id: ${{ secrets.INSTALL_ID }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
 
       - name: Rebuild CONTRIBUTORS from Signed-off-by
         id: rebuild
         run: bash .github/scripts/update-contributors.sh
 
-      - name: Commit CONTRIBUTORS if changed
+      - name: Open a PR with the CONTRIBUTORS update
+        id: open_pr
         if: steps.rebuild.outputs.changed == '1'
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
+          SOURCE_PR: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
         run: |
-          set -e
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          set -euo pipefail
+          branch="contributors/${BASE_REF}"
+
+          git config user.name "$BOT_NAME"
+          git config user.email "$BOT_EMAIL"
           git config commit.gpgsign false
           git add CONTRIBUTORS
-          git commit -m "chore: update CONTRIBUTORS from Signed-off-by"
-          git push origin "HEAD:${BASE_REF}"
+          git commit \
+            -m "chore: update CONTRIBUTORS from Signed-off-by" \
+            -m "Rebuilt after #${SOURCE_PR}." \
+            -m "Signed-off-by: ${BOT_SIGNOFF}"
+          git -c http.extraHeader="AUTHORIZATION: bearer ${GH_TOKEN}" \
+            push --force origin "HEAD:${branch}"
 
-      - name: Label the merged PR
+          number="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --base "$BASE_REF" \
+            --state open --json number --jq '.[0].number // empty')"
+          if [ -z "$number" ]; then
+            gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
+              --base "$BASE_REF" \
+              --head "$branch" \
+              --title "chore: update CONTRIBUTORS after #${SOURCE_PR}" \
+              --body "Rebuilt CONTRIBUTORS from Signed-off-by trailers after #${SOURCE_PR}. Opened by the Contributors workflow." \
+              --assignee "$MAINTAINER" \
+              --reviewer "$MAINTAINER"
+            number="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --base "$BASE_REF" \
+              --state open --json number --jq '.[0].number // empty')"
+          else
+            echo "PR #${number} for ${branch} already exists; branch refreshed"
+          fi
+          printf 'number=%s\n' "$number" >>"$GITHUB_OUTPUT"
+
+      - name: Label PRs
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          MERGED_PR: ${{ github.event.pull_request.number }}
+          NEW_PR: ${{ steps.open_pr.outputs.number }}
         run: |
           set -e
           if ! gh api "repos/${GITHUB_REPOSITORY}/labels/CONTRIBUTORS" >/dev/null 2>&1; then
@@ -64,5 +112,8 @@ jobs:
               --field color=5319e7 \
               --field description="Sign-off added or CONTRIBUTORS updated" >/dev/null
           fi
-          gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/labels" \
-            --method POST --field 'labels[]=CONTRIBUTORS' >/dev/null
+          for number in "$MERGED_PR" "$NEW_PR"; do
+            [ -n "$number" ] || continue
+            gh api "repos/${GITHUB_REPOSITORY}/issues/${number}/labels" \
+              --method POST --field 'labels[]=CONTRIBUTORS' >/dev/null
+          done

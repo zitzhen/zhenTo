@@ -10,7 +10,8 @@
 #      contributor's noreply address as author while the committer becomes the
 #      maintainer. When that noreply login is the PR author, a real (non-noreply)
 #      sign-off is accepted as the contributor's DCO certification.
-#   5. Exception: Dependabot's author email + support@github.com sign-off is allowed
+#   5. Automation accounts keep their noreply author address and sign off with
+#      a fixed service email; only the exact author/sign-off pairs below pass.
 
 set -euo pipefail
 
@@ -25,10 +26,11 @@ GITHUB_STEP_SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
 
 zero="0000000000000000000000000000000000000000"
 
-# Dependabot commits use a GitHub noreply author address and sign off
-# with support@github.com. Allow exactly this pair as an exception.
-dependabot_author="49699333+dependabot[bot]@users.noreply.github.com"
-dependabot_signoff="support@github.com"
+# Format: <author email>|<accepted Signed-off-by email>
+bot_signoffs=(
+    "49699333+dependabot[bot]@users.noreply.github.com|support@github.com"
+    "358577549+zhento-bot[bot]@users.noreply.github.com|zhento-bot-noreply@zit.email"
+)
 
 # Compute the commit range to check
 if [ "$EVENT_NAME" = "pull_request" ]; then
@@ -91,6 +93,16 @@ for sha in "${commits[@]}"; do
         esac
     fi
 
+    # An automation commit is allowed to keep its noreply author address, but
+    # only with the service sign-off registered for that exact author.
+    allowed_signoff=""
+    for pair in "${bot_signoffs[@]}"; do
+        if [ "$author_email" = "${pair%%|*}" ]; then
+            allowed_signoff="${pair#*|}"
+            break
+        fi
+    done
+
     sob_list=$(mktemp)
     printf '%s\n' "$body" |
         sed -n 's/^[Ss]igned-off-by:[[:space:]]*.*<\([^<>]*\)>[[:space:]]*$/\1/p' |
@@ -108,7 +120,7 @@ for sha in "${commits[@]}"; do
             email_is_noreply=0
             case "$email" in *noreply*) email_is_noreply=1 ;; esac
             if [ "$email" = "$author_email" ] || [ "$email" = "$committer_email" ] ||
-                { [ "$author_email" = "$dependabot_author" ] && [ "$email" = "$dependabot_signoff" ]; } ||
+                { [ -n "$allowed_signoff" ] && [ "$email" = "$allowed_signoff" ]; } ||
                 { [ "$author_is_pr_noreply" -eq 1 ] && [ "$email_is_noreply" -eq 0 ]; }; then
                 matched=1
             fi
@@ -118,21 +130,28 @@ for sha in "${commits[@]}"; do
         fi
         for email in "${sob_emails[@]}"; do
             case "$email" in
-            *noreply*) problems+=("Signed-off-by uses a privacy email <${email}>, please use a real email") ;;
+            *noreply*)
+                if [ "$email" != "$allowed_signoff" ]; then
+                    problems+=("Signed-off-by uses a privacy email <${email}>, please use a real email")
+                fi
+                ;;
             esac
         done
     fi
 
-    case "$author_email" in
-    "$dependabot_author") ;;
-    *noreply*)
-        if [ "$author_is_pr_noreply" -eq 1 ]; then
-            echo "NOTE  ${short}: author is PR author ${PR_AUTHOR_LOGIN} behind a noreply address; real-email sign-off accepted"
-        else
-            problems+=("Author email is a privacy email <${author_email}>, please configure a real email and re-commit")
-        fi
-        ;;
-    esac
+    if [ -n "$allowed_signoff" ]; then
+        echo "NOTE  ${short}: automation author ${author_email}; service sign-off accepted"
+    else
+        case "$author_email" in
+        *noreply*)
+            if [ "$author_is_pr_noreply" -eq 1 ]; then
+                echo "NOTE  ${short}: author is PR author ${PR_AUTHOR_LOGIN} behind a noreply address; real-email sign-off accepted"
+            else
+                problems+=("Author email is a privacy email <${author_email}>, please configure a real email and re-commit")
+            fi
+            ;;
+        esac
+    fi
 
     if [ "${#problems[@]}" -eq 0 ]; then
         echo "OK   ${short} ${subject}"
