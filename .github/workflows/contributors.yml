@@ -50,7 +50,6 @@ jobs:
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE }}
-          installation-id: ${{ secrets.INSTALL_ID }}
           permission-contents: write
           permission-issues: write
           permission-pull-requests: write
@@ -66,9 +65,16 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           SOURCE_PR: ${{ github.event.pull_request.number }}
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          EXPECTED_INSTALL_ID: ${{ secrets.INSTALL_ID }}
+          ACTUAL_INSTALL_ID: ${{ steps.app_token.outputs.installation-id }}
         run: |
           set -euo pipefail
           branch="contributors/${BASE_REF}"
+
+          if [ "$EXPECTED_INSTALL_ID" != "$ACTUAL_INSTALL_ID" ]; then
+            echo "::error::GitHub App installation mismatch: expected ${EXPECTED_INSTALL_ID}, got ${ACTUAL_INSTALL_ID}"
+            exit 1
+          fi
 
           git config user.name "$BOT_NAME"
           git config user.email "$BOT_EMAIL"
@@ -78,8 +84,9 @@ jobs:
             -m "chore: update CONTRIBUTORS from Signed-off-by" \
             -m "Rebuilt after #${SOURCE_PR}." \
             -m "Signed-off-by: ${BOT_SIGNOFF}"
-          git -c http.extraHeader="AUTHORIZATION: bearer ${GH_TOKEN}" \
-            push --force origin "HEAD:${branch}"
+          git push --force \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "HEAD:${branch}"
 
           number="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --base "$BASE_REF" \
             --state open --json number --jq '.[0].number // empty')"
