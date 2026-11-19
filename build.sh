@@ -184,8 +184,9 @@ install_ppa_repositories() {
 }
 
 # ---------------------------------------------------------------------------
-# Prepare apt: used by the host build and by --apps-only inside the chroot.
-# Keeping this in one function preserves the target-system PPA behaviour.
+# Prepare apt inside the target system. Target PPAs are added only here:
+# the host runner's codename may differ from the base ISO's (e.g. noble host
+# vs resolute image), so adding them on the host would break apt update.
 # ---------------------------------------------------------------------------
 prepare_apt() {
     install_ppa_repositories
@@ -547,8 +548,6 @@ main() {
         command -v "$c" >/dev/null || die "Missing command: $c"
     done
     [ -f "$BASE_ISO" ] || die "Base ISO not found: $BASE_ISO"
-
-    prepare_apt
 
     mkdir -p "$OUT_DIR"
     rm -rf "$WORK_DIR"

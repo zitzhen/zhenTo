@@ -29,7 +29,7 @@ cat >"$MOCK_BIN/id" <<'EOF'
 #!/bin/sh
 echo 0
 EOF
-for cmd in apt-get add-apt-repository curl snap gh \
+for cmd in apt apt-get add-apt-repository curl snap gh \
     xorriso unsquashfs mksquashfs rsync dd; do
     cat >"$MOCK_BIN/$cmd" <<EOF
 #!/bin/sh
@@ -196,5 +196,22 @@ grep -q 'add-apt-repository -y ppa:test/foo' "$MOCK_LOG" || fail 'PPA was not ad
 grep -q 'apt-get update' "$MOCK_LOG" || fail 'apt index was not updated in --apps-only'
 grep -q 'app-stub called' "$MOCK_LOG" || fail 'install-app script was not executed'
 ok "build.sh --apps-only keeps the PPA/apt step before install-app scripts"
+
+# 9. The host build must not add target-system PPAs or refresh apt: the runner
+#    codename may differ from the base ISO's. Let it run until the fake ISO
+#    structure check fails, then assert no apt/PPA call was made on the host.
+: >"$MOCK_LOG"
+set +e
+out=$(PATH="$MOCK_BIN:$PATH" \
+    BASE_ISO="$TMP/fake.iso" OUT_DIR="$TMP/host-out" WORK_DIR="$TMP/host-work" \
+    bash "$REPO_DIR/build.sh" 2>&1)
+rc=$?
+set -e
+[ "$rc" -eq 1 ] || fail "host build with fake ISO exited $rc, expected 1: $out"
+case "$out" in *'not a supported Ubuntu desktop image'*) ;; *) fail "host build did not reach the ISO structure check: $out" ;; esac
+if grep -qE 'add-apt-repository|apt-get' "$MOCK_LOG"; then
+    fail "host build touched apt/PPA: $(cat "$MOCK_LOG")"
+fi
+ok "host build does not add target PPAs or refresh apt"
 
 printf '\nAll preflight smoke tests passed.\n'
