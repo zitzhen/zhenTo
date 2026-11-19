@@ -8,11 +8,13 @@ name: Contributors
 # its checks run immediately without the "approval-required" state. The commit
 # is authored by the same App with a service Signed-off-by trailer.
 #
-# The PR is assigned to and reviewed by MAINTAINER.
+# The PR is assigned to and reviewed by MAINTAINER. The workflow can also be
+# started manually from the Actions tab; it then targets the default branch.
 # pull_request_target keeps write permissions even for merged fork PRs. Only the
 # base branch is checked out and executed, never the PR's working tree.
 
 on:
+  workflow_dispatch:
   pull_request_target:
     types: [closed]
 
@@ -22,7 +24,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: contributors-${{ github.event.pull_request.base.ref }}
+  group: contributors-${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
   cancel-in-progress: false
 
 env:
@@ -33,14 +35,16 @@ env:
 
 jobs:
   update:
-    if: github.event.pull_request.merged == true
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    env:
+      BASE_REF: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
     steps:
       - name: Checkout base branch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ github.event.pull_request.base.ref }}
+          ref: ${{ env.BASE_REF }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -62,7 +66,6 @@ jobs:
         id: open_pr
         if: steps.rebuild.outputs.changed == '1'
         env:
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
           SOURCE_PR: ${{ github.event.pull_request.number }}
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           EXPECTED_INSTALL_ID: ${{ secrets.INSTALL_ID }}
@@ -70,6 +73,10 @@ jobs:
         run: |
           set -euo pipefail
           branch="contributors/${BASE_REF}"
+          source="manual run"
+          if [ -n "${SOURCE_PR:-}" ]; then
+            source="PR #${SOURCE_PR}"
+          fi
 
           if [ "$EXPECTED_INSTALL_ID" != "$ACTUAL_INSTALL_ID" ]; then
             echo "::error::GitHub App installation mismatch: expected ${EXPECTED_INSTALL_ID}, got ${ACTUAL_INSTALL_ID}"
@@ -82,7 +89,7 @@ jobs:
           git add CONTRIBUTORS
           git commit \
             -m "chore: update CONTRIBUTORS from Signed-off-by" \
-            -m "Rebuilt after #${SOURCE_PR}." \
+            -m "Rebuilt after ${source}." \
             -m "Signed-off-by: ${BOT_SIGNOFF}"
           git push --force \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
@@ -95,8 +102,8 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --base "$BASE_REF" \
               --head "$branch" \
-              --title "chore: update CONTRIBUTORS after #${SOURCE_PR}" \
-              --body "Rebuilt CONTRIBUTORS from Signed-off-by trailers after #${SOURCE_PR}. Opened by the Contributors workflow." \
+              --title "chore: update CONTRIBUTORS after ${source}" \
+              --body "Rebuilt CONTRIBUTORS from Signed-off-by trailers after ${source}. Opened by the Contributors workflow." \
               --assignee "$MAINTAINER" \
               --reviewer "$MAINTAINER"
             number="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --base "$BASE_REF" \
