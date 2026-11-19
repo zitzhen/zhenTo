@@ -21,7 +21,7 @@ bash tests/preflight.test.sh
 
 ## 版本真值
 
-产品版本统一为 `0.1.1`（`build.sh`、`edit-os-release/os-release` 的 `VERSION_ID`、`.github/workflows/build-iso.yml` 的 `inputs.version default`）。基础镜像仍为 Ubuntu 26.04.1，`os-release` 的 `VERSION` 文案为 `26.04.1 (Resolute Raccoon)`。`check-version-consistency.sh` 负责防止这三处再次漂移。
+产品版本统一为 `0.1.1`，真值只有两处：`build.sh` 的 `VERSION` 默认值与 `edit-os-release/os-release` 的 `VERSION_ID`。`.github/workflows/build-iso.yml` 的 `version` 输入默认为空，表示从 `os-release` 自动读取；手工填写的版本必须与品牌信息一致，否则 `Resolve version` job 会在下载基础镜像之前直接失败。基础镜像仍为 Ubuntu 26.04.1，`os-release` 的 `VERSION` 文案为 `26.04.1 (Resolute Raccoon)`。`check-version-consistency.sh` 负责防止两处再次漂移，并校验工作流确实调用了 `.github/actions/build-iso`。
 
 ## 安全约定
 
@@ -33,7 +33,7 @@ bash tests/preflight.test.sh
 ## CI 接线
 
 - `.github/workflows/pr-check.yml`：lint job 内增加单测与版本一致性；新增无 root 的 `preflight` job。
-- `.github/workflows/build-iso.yml`：`Build ISO` 前跑 `./build.sh --check`，`Build ISO` 后跑 `verify-artifact.sh`。
+- `.github/workflows/build-iso.yml`：`meta` job 解析版本（默认取 `os-release`）并做快速失败校验；`build` job 调用 `.github/actions/build-iso`，依次安装依赖、下载并校验基础镜像、预检、构建、跑 `verify-artifact.sh`、分卷打包，最后按 `release` 输入创建草稿或正式 Release。
 - `.github/workflows/vm-smoke.yml`：仅手动或 `v*` tag 触发，独立 job 且 `continue-on-error: true`。GitHub 托管 runner 无 `/dev/kvm`，TCG 软件模拟很慢；需要稳定结果时应迁到带 KVM 的自托管 runner。
 
 ## 新增测试时

@@ -73,7 +73,10 @@ ZhenTo 是一款基于 **Ubuntu 26.04.1 LTS "Resolute Raccoon"** 定制的 Linux
 ├── scripts/
 │   └── download-release.*    # 下载 GitHub Release 的全部资产（sh / ps1 / cmd）
 ├── tests/                    # 四层冒烟测试（详见 tests/README.md）
-└── .github/                  # Issue/PR 模板、CI 工作流、自动标签
+└── .github/
+    ├── actions/build-iso/    # 可复用 composite action：构建 + 验证 + 打包
+    ├── workflows/            # CI 工作流（PR 门禁、ISO 构建、VM 冒烟、DCO 等）
+    └── ISSUE_TEMPLATE/       # Issue/PR 模板
 ```
 
 ## 构建 ISO
@@ -192,14 +195,14 @@ bash tests/preflight.test.sh
 |---|---|---|
 | `pr-check.yml` | 每次 Pull Request | 语法检查、单元测试、版本一致性、shellcheck、actionlint、gitleaks、非 root 预检 |
 | `dco.yml` | push 和 PR | 强制 `Signed-off-by` 签署（开发者来源认证 DCO） |
-| `build-iso.yml` | `v*` tag 或手动触发 | 预检 → 构建 → 验证 → 拆分 → 发布草稿 |
+| `build-iso.yml` | `v*` tag 或手动触发 | 解析版本 → 通过 `.github/actions/build-iso` 构建 → 验证 → 拆分 → 发布（草稿/正式/不发布） |
 | `vm-smoke.yml` | `v*` tag 或手动触发 | 参考性 QEMU + OVMF 启动检查（`continue-on-error`） |
 | `auto-label.yml` | PR 活动 | 自动添加标签 |
 
 ## 参与贡献
 
 1. Fork 本仓库，从 `main` 创建分支。
-2. 进行改动，并保持版本在 `build.sh`、`edit-os-release/os-release` 和 `.github/workflows/build-iso.yml` 三处一致。
+2. 进行改动，并保持版本在 `build.sh` 与 `edit-os-release/os-release` 两处一致。构建工作流从 `os-release` 自动读取版本，不再维护第三份拷贝。
 3. 运行上述本地检查。
 4. 提交时带上 DCO 签署：
 
