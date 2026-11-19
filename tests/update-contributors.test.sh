@@ -32,11 +32,11 @@ run_generator() {
     CONTRIBUTORS_FILE="$workdir/CONTRIBUTORS" GITHUB_OUTPUT="$workdir/output" bash "$script"
 }
 
-# 1. Extract from Signed-off-by, de-duplicate by email, sort case-insensitively.
+# 1. Extract from Signed-off-by, de-duplicate by email, sort deterministically.
 commit "first" "Signed-off-by: Oliver Lin <oliver@example.com>"
 commit "second" "Signed-off-by: freedom-323 <long@example.com>"
 run_generator
-expected=$'freedom-323 <long@example.com>\nOliver Lin <oliver@example.com>'
+expected=$'Oliver Lin <oliver@example.com>\nfreedom-323 <long@example.com>'
 [ "$(cat "$workdir/CONTRIBUTORS")" = "$expected" ] || fail "extraction / sorting"
 grep -qx 'changed=1' "$workdir/output" || fail "first run must report changed=1"
 
@@ -53,14 +53,14 @@ grep -qx 'changed=0' "$workdir/output" || fail "bot-only commits must not change
 # 4. Newest sign-off wins the name spelling for the same email.
 commit "rename" "Signed-off-by: Oliver L. <oliver@example.com>"
 run_generator
-[ "$(cat "$workdir/CONTRIBUTORS")" = $'freedom-323 <long@example.com>\nOliver L. <oliver@example.com>' ] ||
+[ "$(cat "$workdir/CONTRIBUTORS")" = $'Oliver L. <oliver@example.com>\nfreedom-323 <long@example.com>' ] ||
     fail "newest spelling should replace the old one"
 
 # 5. Missing file is created; ignored trailer forms are not parsed.
 rm -f "$workdir/CONTRIBUTORS"
 commit "noise" $'not-a-trailer: Someone <someone@example.com>\nSigned-off-by: No Email Here'
 run_generator
-[ "$(cat "$workdir/CONTRIBUTORS")" = $'freedom-323 <long@example.com>\nOliver L. <oliver@example.com>' ] ||
+[ "$(cat "$workdir/CONTRIBUTORS")" = $'Oliver L. <oliver@example.com>\nfreedom-323 <long@example.com>' ] ||
     fail "invalid trailers must be ignored"
 grep -qx 'changed=1' "$workdir/output" || fail "recreated file must report changed=1"
 

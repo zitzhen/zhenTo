@@ -11,7 +11,8 @@
 #   2. Bot identities and privacy addresses are ignored (they are not contributors).
 #   3. De-duplicate by lower-cased email; the newest sign-off wins the spelling
 #      because `git log` walks commits newest-first.
-#   4. Sort case-insensitively so the output is deterministic and idempotent.
+#   4. Sort by raw bytes (LC_ALL=C) so the output is deterministic and idempotent
+#      without reordering existing entries because of letter case.
 
 set -euo pipefail
 
@@ -42,7 +43,7 @@ git log --format='%B' |
             print line
         }
     ' |
-    LC_ALL=C sort -f >"$tmp"
+    LC_ALL=C sort >"$tmp"
 
 changed=0
 if [ ! -f "$CONTRIBUTORS_FILE" ] || ! cmp -s "$tmp" "$CONTRIBUTORS_FILE"; then
