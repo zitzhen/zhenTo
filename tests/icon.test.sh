@@ -108,4 +108,18 @@ cmp -s "$FAKE_ROOT/usr/share/backgrounds/zhento.png" "$SOURCES/zhento-full.png" 
     fail "content mismatch for backgrounds/zhento.png"
 ok "installed content matches repository sources"
 
+# 6. The full banner and text logos must keep an alpha channel. Issue #53:
+# GDM3 and GNOME Settings show the logo on their own backgrounds, so an opaque
+# white banner appears as a jarring white box. PNG IHDR byte 25 is the color
+# type: 6 = truecolor with alpha. No ImageMagick dependency, so this runs in CI.
+for rel in \
+    "$SOURCES/zhento-full.png" \
+    "$REPO_DIR/edit-icon/files/pixmaps/ubuntu-logo-text.png" \
+    "$REPO_DIR/edit-icon/files/pixmaps/ubuntu-logo-text-dark.png"; do
+    [ -f "$rel" ] || fail "missing transparency check target: $rel"
+    color_type=$(od -An -tu1 -j25 -N1 "$rel" | tr -d '[:space:]')
+    [ "$color_type" = "6" ] || fail "no alpha channel (IHDR color type $color_type): $rel"
+done
+ok "full banner and text logo PNGs have alpha channels"
+
 printf '\nAll icon installer tests passed.\n'
