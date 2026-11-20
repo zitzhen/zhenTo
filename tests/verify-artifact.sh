@@ -108,7 +108,11 @@ for f in usr/bin/curl usr/bin/git usr/bin/zsh usr/bin/patchsplit \
     usr/share/pixmaps/ubuntu-logo-text-dark.png \
     usr/share/pixmaps/debian-logo.png \
     usr/share/pixmaps/debian-logo.bmp \
-    usr/share/backgrounds/zhento.png; do
+    usr/share/backgrounds/zhento.png \
+    usr/share/backgrounds/zhento-light.png \
+    usr/share/backgrounds/zhento-dark.png \
+    usr/share/backgrounds/zhento-wallpapers.copyright \
+    usr/share/glib-2.0/schemas/zz-zhento-wallpaper.gschema.override; do
     unsquashfs -cat "$TMP/$layer" "/$f" >/dev/null 2>&1 ||
         die "Missing in image: /$f"
     ok "present in image: /$f"

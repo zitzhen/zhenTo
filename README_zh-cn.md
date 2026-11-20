@@ -55,6 +55,8 @@ ZhenTo 是一款基于 **Ubuntu 26.04.1 LTS "Resolute Raccoon"** 定制的 Linux
 ```text
 .
 ├── build.sh                  # 主 ISO 构建脚本（解压 → chroot → 重新打包）
+├── edit-backgrounds/
+│   └── edit-backgrounds.sh   # 从 GitHub Releases 下载 ZhenTo 壁纸并设为 GNOME 默认壁纸
 ├── edit-grub/
 │   ├── grub.cfg              # ZhenTo GRUB 菜单
 │   └── replace-grub.sh       # 将菜单写入目标 grub.cfg（自动备份）
@@ -121,6 +123,8 @@ sudo BASE_ISO=/path/to/ubuntu-26.04.1-desktop-amd64.iso ./build.sh
 | `SQUASHFS_COMP` | 继承原值 | Squashfs 压缩算法（`zstd` 比 `xz` 快得多） |
 | `SQUASHFS_BLOCK` | 继承原值 | Squashfs 块大小（通常为 `131072`） |
 | `ICON_SRC_DIR` | `<repo>/edit-icon/sources` | 品牌图标素材目录（短图标 + 完整横幅 PNG） |
+| `WALLPAPER_REPO` | `zitzhen/zhento-backgrounds` | 提供壁纸的 GitHub 仓库（Release 资产） |
+| `WALLPAPER_TAG` | `zhenTo-coffee-1.0.0` | 壁纸 Release 标签（资产 SHA256 已在安装器中固定） |
 
 如果 `VERSION` 与 `edit-os-release/os-release` 中的版本不一致，构建脚本将拒绝运行，从而确保品牌信息不会与版本号脱节。
 
@@ -134,6 +138,8 @@ sudo BASE_ISO=/path/to/ubuntu-26.04.1-desktop-amd64.iso ./build.sh
 | `zhento-full.png` | `zhento.png`（1774×887） | `2f2949680a77be8c1d050d4741a91fb9b5dd0834473ca8e6f1ba7095a398ff5d` |
 
 短图标替换 `/usr/share/pixmaps/` 下的 7 个 `ubuntu-logo*` / `debian-logo*` 品牌位；完整横幅作为 `/usr/share/backgrounds/zhento.png` 新增壁纸。镜像中的其他图标保持不变。`edit-icon/files/pixmaps/` 中的 PNG/SVG 文件是**预生成并提交进 git** 的，因此构建时无需 ImageMagick、也无需联网。图稿变更后运行 `./edit-icon/generate-icons.sh`（需 ImageMagick）重新生成并提交即可。由于没有单独的暗色素材，`-text-dark` 变体复用浅色图稿。
+
+桌面壁纸来自 [zitzhen/zhento-backgrounds](https://github.com/zitzhen/zhento-backgrounds) 的 Releases，由 `edit-backgrounds/edit-backgrounds.sh` **在构建时下载**。`oliver-ZhenTo_Coffee_Mug_Light.png` 与 `...Dark.png` 会安装为 `/usr/share/backgrounds/` 下的 `zhento-light.png` / `zhento-dark.png`，并附带上游的 `copyright` 声明（CC-BY-SA-4.0）。gschema override 会将它们分别设为浅色 / 深色模式的默认壁纸（用户可在设置中覆盖）；若目标系统没有 GNOME 壁纸 schema，则只安装图片、不修改默认壁纸。每个资产的 SHA256 都固定在安装器中——文件缺失或校验不符会让构建失败，不会把未经验证的壁纸打进镜像。要使用其他版本，请设置 `WALLPAPER_TAG`（并同步更新固定的校验值）。
 
 ## 使用 ISO
 
@@ -173,6 +179,7 @@ Windows 用户可使用 `scripts\download-release.ps1`（PowerShell）或 `scrip
 |---|---|---|---|
 | 单元测试 / 版本一致性 | `node --test tests/*.test.js` 和 `bash tests/check-version-consistency.sh` | Node.js 22+；无需 root、无需网络 | 是 |
 | 预检（mock） | `bash tests/preflight.test.sh` | bash；无需 root、无需网络 | 是 |
+| 安装器（mock） | `bash tests/icon.test.sh` 和 `bash tests/backgrounds.test.sh` | bash；无需 root、无需网络 | 是 |
 | 产物验证 | `bash tests/verify-artifact.sh <iso> <version>` | `xorriso`、`unsquashfs`、`md5sum`、`sha256sum` | 否（在 build job 内阻断构建） |
 | VM 启动冒烟 | `bash tests/vm-smoke.sh <iso> [超时秒数]` | `qemu-system-x86_64`、OVMF | 否（仅供参考） |
 
@@ -182,6 +189,8 @@ Windows 用户可使用 `scripts\download-release.ps1`（PowerShell）或 `scrip
 node --test tests/*.test.js
 bash tests/check-version-consistency.sh
 bash tests/preflight.test.sh
+bash tests/icon.test.sh
+bash tests/backgrounds.test.sh
 ```
 
 详情与安全注意事项见 [tests/README.md](tests/README.md)。

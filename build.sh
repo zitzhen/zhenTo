@@ -20,6 +20,8 @@
 #   SQUASHFS_COMP  Squashfs compression algorithm (default inherited from original layer, e.g. xz; zstd is much faster)
 #   SQUASHFS_BLOCK Squashfs block size (default inherited from original layer, usually 131072)
 #   ICON_SRC_DIR   Brand icon source directory (default <repo>/edit-icon/sources)
+#   WALLPAPER_REPO Wallpaper GitHub owner/repo (default zitzhen/zhento-backgrounds)
+#   WALLPAPER_TAG  Wallpaper release tag (default zhenTo-coffee-1.0.0)
 #
 # Note: Ubuntu 26.04 desktop ISO uses layered squashfs (described in casper/install-sources.yaml).
 # By default only the base layer of the "default install source" is modified; the language layer
@@ -40,6 +42,8 @@ KEEP_WORK=${KEEP_WORK:-0}
 SQUASHFS_COMP=${SQUASHFS_COMP:-}
 SQUASHFS_BLOCK=${SQUASHFS_BLOCK:-}
 ICON_SRC_DIR=${ICON_SRC_DIR:-"$SELF_DIR/edit-icon/sources"}
+WALLPAPER_REPO=${WALLPAPER_REPO:-zitzhen/zhento-backgrounds}
+WALLPAPER_TAG=${WALLPAPER_TAG:-zhenTo-coffee-1.0.0}
 
 ISO_NAME="zhenTo-${VERSION}-amd64.iso"
 ISO_DIR="$WORK_DIR/iso"
@@ -71,7 +75,7 @@ fi
 # ---------------------------------------------------------------------------
 preflight_checks() {
     [ "$(id -u)" -eq 0 ] || die "root is required (chroot / mount): sudo $0 --check"
-    for c in xorriso unsquashfs mksquashfs rsync dd awk; do
+    for c in xorriso unsquashfs mksquashfs rsync dd awk curl sha256sum; do
         command -v "$c" >/dev/null || die "Missing command: $c"
     done
     [ -f "$BASE_ISO" ] || die "Base ISO not found: $BASE_ISO"
@@ -102,6 +106,7 @@ preflight_checks() {
         "$SELF_DIR/edit-icon/files/pixmaps/ubuntu-logo.svg" \
         "$SELF_DIR/edit-icon/files/pixmaps/ubuntu-logo-text.png" \
         "$SELF_DIR/edit-icon/files/pixmaps/debian-logo.png" \
+        "$SELF_DIR/edit-backgrounds/edit-backgrounds.sh" \
         "$ICON_SRC_DIR/zhento-short.png" \
         "$ICON_SRC_DIR/zhento-full.png" \
         "$SELF_DIR/install-app/ppa.list"; do
@@ -404,6 +409,25 @@ apply_icons() {
 }
 
 # ---------------------------------------------------------------------------
+# Wallpapers: download ZhenTo wallpapers from the zhento-backgrounds GitHub
+# Release at build time and set them as the GNOME default. Runs on the host
+# against $ROOT_DIR (never copied into the chroot, never shipped in the image).
+# ---------------------------------------------------------------------------
+apply_backgrounds() {
+    local src="$SELF_DIR/edit-backgrounds/edit-backgrounds.sh"
+
+    [ -f "$src" ] || {
+        warn "edit-backgrounds/edit-backgrounds.sh is missing, skipping wallpapers"
+        return 0
+    }
+
+    log "Downloading and installing ZhenTo wallpapers"
+    WALLPAPER_REPO="$WALLPAPER_REPO" WALLPAPER_TAG="$WALLPAPER_TAG" \
+        sh "$src" "$ROOT_DIR" ||
+        die "Failed to install wallpapers"
+}
+
+# ---------------------------------------------------------------------------
 # Boot menu: replace boot/grub/grub.cfg in the ISO tree with the config from edit-grub/
 # ---------------------------------------------------------------------------
 apply_grub() {
@@ -511,6 +535,7 @@ patch_layer() {
     apply_hostname
     apply_hosts
     apply_icons
+    apply_backgrounds
 
     log "Cleaning up build-time artifacts"
     rm -rf "$ROOT_DIR/opt/zhento-build"
@@ -544,7 +569,7 @@ main() {
     local -a layer_list
 
     [ "$(id -u)" -eq 0 ] || die "root is required (chroot / mount): sudo $0"
-    for c in xorriso unsquashfs mksquashfs rsync dd awk; do
+    for c in xorriso unsquashfs mksquashfs rsync dd awk curl sha256sum; do
         command -v "$c" >/dev/null || die "Missing command: $c"
     done
     [ -f "$BASE_ISO" ] || die "Base ISO not found: $BASE_ISO"

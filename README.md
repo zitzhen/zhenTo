@@ -53,6 +53,8 @@ The whole image is assembled by shell scripts — the old dependency on Cubic ha
 ```text
 .
 ├── build.sh                  # Main ISO build script (unpack → chroot → repack)
+├── edit-backgrounds/
+│   └── edit-backgrounds.sh   # Download ZhenTo wallpapers from GitHub Releases and set as GNOME default
 ├── edit-grub/
 │   ├── grub.cfg              # ZhenTo GRUB menu
 │   └── replace-grub.sh       # Install the menu into a target grub.cfg (with backup)
@@ -119,6 +121,8 @@ On success, `out/zhenTo-<VERSION>-amd64.iso` and its `.md5` file are produced. I
 | `SQUASHFS_COMP` | inherited | Squashfs compression (`zstd` is much faster than `xz`) |
 | `SQUASHFS_BLOCK` | inherited | Squashfs block size (usually `131072`) |
 | `ICON_SRC_DIR` | `<repo>/edit-icon/sources` | Brand icon source directory (short + full PNG) |
+| `WALLPAPER_REPO` | `zitzhen/zhento-backgrounds` | GitHub repo whose Release supplies the wallpapers |
+| `WALLPAPER_TAG` | `zhenTo-coffee-1.0.0` | Wallpaper Release tag (assets are checksum-pinned in the installer) |
 
 The build script refuses to run if `VERSION` does not match `edit-os-release/os-release`, so branding never drifts from the release number.
 
@@ -132,6 +136,8 @@ The brand artwork lives in [zitzhen/zhenTo-icon](https://github.com/zitzhen/zhen
 | `zhento-full.png` | `zhento.png` (1774×887) | `2f2949680a77be8c1d050d4741a91fb9b5dd0834473ca8e6f1ba7095a398ff5d` |
 
 The short logo replaces the seven `ubuntu-logo*` / `debian-logo*` slots in `/usr/share/pixmaps/`; the full banner is added as `/usr/share/backgrounds/zhento.png`. Other icons in the image are left untouched. The PNG/SVG files in `edit-icon/files/pixmaps/` are **pre-generated and committed**, so the build needs no ImageMagick and no network access. To regenerate them after an artwork change, run `./edit-icon/generate-icons.sh` (requires ImageMagick) and commit the result. The `-text-dark` variants reuse the light artwork because no separate dark asset exists.
+
+Desktop wallpapers come from the [zitzhen/zhento-backgrounds](https://github.com/zitzhen/zhento-backgrounds) Releases and are **downloaded at build time** by `edit-backgrounds/edit-backgrounds.sh`. The `oliver-ZhenTo_Coffee_Mug_Light.png` and `...Dark.png` assets are installed as `zhento-light.png` / `zhento-dark.png` in `/usr/share/backgrounds/`, together with the upstream `copyright` notice (CC-BY-SA-4.0). A gschema override sets them as the default wallpaper for light and dark mode respectively (user-overridable); if the target has no GNOME background schema, the images are still installed without changing the default. Each asset's SHA256 is pinned in the installer — a missing file or checksum mismatch fails the build rather than shipping an unverified wallpaper. To use a different release, set `WALLPAPER_TAG` (and update the pinned checksums).
 
 ## Using the ISO
 
@@ -171,6 +177,7 @@ Four layers of checks are arranged by increasing cost. The lower layers are mand
 |---|---|---|---|
 | Unit tests / version consistency | `node --test tests/*.test.js` and `bash tests/check-version-consistency.sh` | Node.js 22+; no root, no network | Yes |
 | Preflight (mocked) | `bash tests/preflight.test.sh` | bash; no root, no network | Yes |
+| Installer (mocked) | `bash tests/icon.test.sh` and `bash tests/backgrounds.test.sh` | bash; no root, no network | Yes |
 | Artifact verification | `bash tests/verify-artifact.sh <iso> <version>` | `xorriso`, `unsquashfs`, `md5sum`, `sha256sum` | No (blocks the build job) |
 | VM boot smoke | `bash tests/vm-smoke.sh <iso> [timeout]` | `qemu-system-x86_64`, OVMF | No (advisory) |
 
@@ -180,6 +187,8 @@ Run the local gates in one shot:
 node --test tests/*.test.js
 bash tests/check-version-consistency.sh
 bash tests/preflight.test.sh
+bash tests/icon.test.sh
+bash tests/backgrounds.test.sh
 ```
 
 See [tests/README.md](tests/README.md) for details and safety notes.
