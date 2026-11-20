@@ -5,8 +5,8 @@
 #
 # ZhenTo ISO build script (UEFI-only, no longer depends on Cubic)
 #
-#   sudo ./build.sh              Unpack official ISO -> install APPs in chroot -> repack -> output ISO
-#   sudo ./build.sh --apps-only  Run install-app/*.sh only (inside chroot or on a real system)
+#   sudo ./build.sh              Unpack official ISO -> install software sources + APPs in chroot -> repack -> output ISO
+#   sudo ./build.sh --apps-only  Run install-software-source/*.sh then install-app/*.sh (inside chroot or on a real system)
 #   sudo ./build.sh --check      Read-only preflight; exits before any apt/PPA changes
 #
 # Overridable environment variables:
@@ -109,6 +109,7 @@ preflight_checks() {
         "$SELF_DIR/edit-backgrounds/edit-backgrounds.sh" \
         "$ICON_SRC_DIR/zhento-short.png" \
         "$ICON_SRC_DIR/zhento-full.png" \
+        "$SELF_DIR/install-software-source/install-software-source.sh" \
         "$SELF_DIR/install-app/ppa.list"; do
         [ -f "$f" ] || die "Missing build input: $f"
     done
@@ -200,6 +201,29 @@ prepare_apt() {
 }
 
 # ---------------------------------------------------------------------------
+# Preinstall software sources: run scripts under install-software-source/ on a
+# real system or inside chroot. Runs before install_apps so that packages from
+# those sources are available when the APP installers run.
+# ---------------------------------------------------------------------------
+install_software_sources() {
+    local src
+    local found=0
+
+    cd "$SELF_DIR"
+    echo "==> Installing software sources..."
+
+    for src in install-software-source/*.sh; do
+        [ -e "$src" ] || continue
+        found=1
+        echo "==> Running ${src}"
+        sh "$src"
+    done
+
+    [ "$found" -eq 1 ] || echo "==> No scripts under install-software-source/"
+    echo "==> All software sources installed."
+}
+
+# ---------------------------------------------------------------------------
 # Preinstall APPs: run scripts under install-app/ on a real system or inside chroot
 # ---------------------------------------------------------------------------
 install_apps() {
@@ -222,6 +246,7 @@ install_apps() {
 
 if [ "${1:-}" = "--apps-only" ]; then
     prepare_apt
+    install_software_sources
     install_apps
     exit 0
 fi
@@ -488,6 +513,8 @@ patch_layer() {
     cp -f "$SELF" "$ROOT_DIR/opt/zhento-build/build.sh"
     rm -rf "$ROOT_DIR/opt/zhento-build/install-app"
     cp -a "$SELF_DIR/install-app" "$ROOT_DIR/opt/zhento-build/install-app"
+    rm -rf "$ROOT_DIR/opt/zhento-build/install-software-source"
+    cp -a "$SELF_DIR/install-software-source" "$ROOT_DIR/opt/zhento-build/install-software-source"
     write_chroot_helpers
 
     mount --bind /dev "$ROOT_DIR/dev"
