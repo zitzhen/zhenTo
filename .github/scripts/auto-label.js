@@ -4,9 +4,10 @@
  *
  * Rules (in priority order):
  *   1. Conventional-commit type in the title  -> type label (enhancement, bug, ci, ...)
+ *   1b. Issue-template dropdowns              -> task type / area label
  *   2. Changed file paths (PR only)           -> area label (installer, build-system, ...)
  *   3. Dependabot author / title              -> dependencies
- *   4. Free-text keywords (Issue only)        -> bug / enhancement / documentation
+ *   4. Free-text keywords (Issue only)        -> bug / enhancement / documentation / new areas
  *   5. Nothing matched                        -> triage
  *
  * Labels in NEW_LABELS are created on demand if they do not exist.
@@ -72,6 +73,26 @@ const NEW_LABELS = {
     color: '5319e7',
     description: 'Sign-off added or CONTRIBUTORS updated',
   },
+  'new-app': {
+    color: 'ce4d8d',
+    description: 'New application installer script under install-app/',
+  },
+  icon: {
+    color: '429e55',
+    description: 'Brand icons and pixmaps under edit-icon/',
+  },
+  background: {
+    color: 'a8dadc',
+    description: 'Wallpapers and background assets under edit-backgrounds/',
+  },
+  'host-config': {
+    color: 'ffd97d',
+    description: 'Hostname and /etc/hosts configuration',
+  },
+  test: {
+    color: 'b7e1cd',
+    description: 'Tests under tests/',
+  },
 };
 
 /** Chinese conventional-commit style prefixes seen in this repo's history. */
@@ -95,6 +116,57 @@ function commitType(title) {
   return '';
 }
 
+/** Read the answer under a rendered issue-template dropdown heading. */
+function templateAnswer(body, headings) {
+  const lines = String(body || '').split(/\r?\n/);
+  const wanted = headings.map((heading) => heading.toLowerCase());
+  for (let i = 0; i < lines.length; i += 1) {
+    const match = lines[i].match(/^\s{0,3}#{1,6}\s+(.+?)\s*$/);
+    if (!match || !wanted.includes(match[1].trim().toLowerCase())) continue;
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const value = lines[j].trim();
+      if (!value) continue;
+      if (/^#{1,6}\s/.test(value)) break;
+      return value;
+    }
+  }
+  return '';
+}
+
+/** Issue-template "component" dropdown -> area labels. */
+const COMPONENT_RULES = [
+  [/iso\s*build|build\.sh|iso 构建|构建系统/i, ['build-system']],
+  [/install-?app|预装应用|预装/i, ['installer']],
+  [/edit-?grub|boot configuration|引导配置/i, ['boot']],
+  [/edit-?os-?release|system info|系统信息/i, ['build-system']],
+  [/utility scripts|工具脚本|\bscripts\b/i, ['scripts']],
+  [/github actions|\bci\b|自动化/i, ['ci']],
+  [/documentation|文档/i, ['documentation']],
+  [/edit-?icon|图标|\bicons?\b|\blogos?\b/i, ['icon']],
+  [/edit-?backgrounds?|wallpaper|壁纸|背景/i, ['background']],
+  [/\bhosts\b|\bhostname\b|\/etc\/hosts|主机名/i, ['host-config']],
+  [/\btests?\b|测试/i, ['test']],
+];
+
+/** Issue-template "task type" dropdown -> canonical commit type. */
+const TASK_TYPE_RULES = [
+  [/github actions|\bci\b|自动化/i, 'ci'],
+  [/\bdeps\b|依赖更新/i, 'deps'],
+  [/documentation|\bdocs\b|文档/i, 'docs'],
+  [/refactor|重构/i, 'refactor'],
+  [/\bperf\b|性能/i, 'perf'],
+  [/i18n|l10n|国际化|本地化/i, 'i18n'],
+  [/build system|构建系统|\bbuild\b/i, 'build'],
+  [/chore|杂务/i, 'chore'],
+];
+
+/** Areas with no dropdown option yet: pick them up from issue prose. */
+const ISSUE_AREA_RULES = [
+  [/\bwallpapers?\b|\bbackgrounds?\b|壁纸|背景/i, 'background'],
+  [/logos?\b|\bicons?\b|图标/i, 'icon'],
+  [/\btests?\b|测试/i, 'test'],
+];
+
 /**
  * Pure rule engine. Exported so the whole rule set can be tested offline.
  * @returns {string[]} sorted, de-duplicated label names
@@ -102,7 +174,19 @@ function commitType(title) {
 function computeLabels({ title = '', body = '', files = [], author = '', isPR = false }) {
   const labels = new Set();
   const text = `${title}\n${body}`.toLowerCase();
-  const type = commitType(title);
+  let type = commitType(title);
+  const taskAnswer = isPR ? '' : templateAnswer(body, ['任务类型', 'Task type']);
+
+  // The maintenance template defaults the title to "chore:"; its dropdown is
+  // the more precise signal when present.
+  if (taskAnswer) {
+    for (const [pattern, mapped] of TASK_TYPE_RULES) {
+      if (pattern.test(taskAnswer)) {
+        type = mapped;
+        break;
+      }
+    }
+  }
 
   // 1. Conventional-commit type
   switch (type) {
@@ -145,12 +229,27 @@ function computeLabels({ title = '', body = '', files = [], author = '', isPR = 
       break;
   }
 
+  // 1b. Issue-template component dropdown + prose areas (Issues have no files).
+  if (!isPR) {
+    const component = templateAnswer(body, [
+      '受影响的组件', '希望改进的组件', 'Affected component', 'Component to improve',
+    ]);
+    for (const [pattern, names] of COMPONENT_RULES) {
+      if (pattern.test(component)) {
+        for (const name of names) labels.add(name);
+      }
+    }
+    for (const [pattern, name] of ISSUE_AREA_RULES) {
+      if (pattern.test(text)) labels.add(name);
+    }
+  }
+
   // 2. Changed paths (PR only)
   if (isPR) {
     for (const raw of files) {
       const p = String(raw).toLowerCase();
 
-      if (p.startsWith('.github/workflows/') || p === '.github/dependabot.yml') {
+      if (p.startsWith('.github/workflows/') || p.startsWith('.github/actions/') || p === '.github/dependabot.yml') {
         labels.add('github_actions');
         labels.add('ci');
       }
@@ -167,19 +266,29 @@ function computeLabels({ title = '', body = '', files = [], author = '', isPR = 
       }
       if (p.startsWith('scripts/')) labels.add('scripts');
       if (p.startsWith('.githooks/')) labels.add('hook');
+      if (p.startsWith('edit-icon/')) labels.add('icon');
+      if (p.startsWith('edit-backgrounds/')) labels.add('background');
+      if (p.startsWith('edit-hostname/') || p.startsWith('edit-hosts/')) labels.add('host-config');
+      if (p.startsWith('tests/')) labels.add('test');
       if (p === 'readme.md' || p.startsWith('docs/') || p.endsWith('.md')) {
         labels.add('documentation');
       }
     }
   }
 
-  // The zh-CN PR template hardcodes the i18n option in every body, so a
-  // body-wide keyword match tags every hook PR as i18n. For PRs whose changes
-  // live entirely under .githooks/, ignore that signal (an explicit i18n: /
-  // l10n: title type above still wins).
+  // The zh-CN templates hardcode "i18n" in every PR body and in the
+  // maintenance issue instructions, so a body-wide keyword match would tag
+  // almost everything as i18n. Ignore those boilerplate signals; an explicit
+  // i18n: / l10n: title type or task-type dropdown still wins above.
   const hookOnly = isPR && files.length > 0 && files.every((raw) => String(raw).toLowerCase().startsWith('.githooks/'));
-  if (!hookOnly && /i18n|l10n|localiz|internationaliz|translat|本地化|国际化|翻译|英文化/.test(text)) {
+  const templateI18nBoilerplate = /标题前缀可按实际情况修改|you can change the title prefix/i.test(body);
+  if (!hookOnly && !templateI18nBoilerplate && /i18n|l10n|localiz|internationaliz|translat|本地化|国际化|翻译|英文化/.test(text)) {
     labels.add('i18n');
+  }
+
+  // A build.sh change can install /etc/hosts without touching a host-* path.
+  if (/\bhosts\b|\bhostname\b|\/etc\/hosts|主机名/i.test(text)) {
+    labels.add('host-config');
   }
 
   // 3. Dependabot PRs. A human fixing a "dependabot" DCO rule is NOT a dependency update.

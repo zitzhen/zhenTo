@@ -154,8 +154,121 @@ test('empty input falls back to triage; output is sorted and unique', () => {
   assert.equal(new Set(labels).size, labels.length);
 });
 
+test('new-directory paths get their own area labels (PR only)', () => {
+  const labels = computeLabels({
+    title: 'chore: touch new areas',
+    isPR: true,
+    files: [
+      'edit-icon/README.md',
+      'edit-backgrounds/edit-backgrounds.sh',
+      'edit-hostname/hostname.sh',
+      'edit-hosts/hosts',
+      'tests/icon.test.sh',
+      '.github/actions/build-iso/action.yml',
+    ],
+  });
+  for (const expected of ['icon', 'background', 'host-config', 'test', 'github_actions', 'documentation']) {
+    assert.ok(labels.includes(expected), `expected label: ${expected}`);
+  }
+  // Path rules must not leak into Issues.
+  const issue = computeLabels({
+    title: 'chore: discuss new areas',
+    isPR: false,
+    files: ['edit-icon/README.md', 'tests/icon.test.sh'],
+  });
+  for (const leaked of ['icon', 'background', 'host-config', 'test']) {
+    assert.ok(!issue.includes(leaked), `unexpected issue label: ${leaked}`);
+  }
+});
+
+test('issue template component dropdown maps to area labels', () => {
+  const app = computeLabels({
+    title: 'feat: something for apps',
+    isPR: false,
+    body: '### 希望改进的组件\n\n预装应用 / install-app（新增或更新软件）\n\n### 想解决什么问题\n\n...',
+  });
+  assert.ok(app.includes('installer'));
+
+  const boot = computeLabels({
+    title: 'fix: menu issue',
+    isPR: false,
+    body: '### Affected component\n\nBoot configuration / edit-grub\n\n### Steps to reproduce\n\n...',
+  });
+  assert.ok(boot.includes('boot'));
+});
+
+test('issue prose picks up icon, background, host and test areas', () => {
+  assert.deepEqual(
+    computeLabels({
+      title: 'fix: 突兀的logo和壁纸',
+      body: '开机后的gmd3和GNOME设置中\n\n### 受影响的组件\n\n其他 / 不确定',
+      isPR: false,
+    }),
+    ['background', 'bug', 'icon'],
+  );
+  const hosts = computeLabels({ title: 'hosts 配置问题', body: '/etc/hosts 主机名映射', isPR: false });
+  assert.ok(hosts.includes('host-config'));
+  // build.sh-only PRs still get host-config when the title says so.
+  const pr = computeLabels({
+    title: 'build: add hostname and hosts configuration to image build',
+    files: ['build.sh'],
+    isPR: true,
+  });
+  assert.ok(pr.includes('host-config'));
+  const test = computeLabels({ title: '测试覆盖不足', isPR: false });
+  assert.ok(test.includes('test'));
+});
+
+test('maintenance task-type dropdown beats the default chore title', () => {
+  const labels = computeLabels({
+    title: 'chore: rebuild pipeline',
+    isPR: false,
+    body: '### 任务类型\n\nCI / 自动化（ci）\n\n### 任务描述\n\n...',
+  });
+  assert.ok(labels.includes('ci'));
+  assert.ok(labels.includes('github_actions'));
+  assert.ok(!labels.includes('chore'));
+});
+
+test('maintenance template i18n example does not tag every issue as i18n', () => {
+  const boilerplate = '> 标题前缀可按实际情况修改，自动打标脚本会识别：\n> `chore:` / `ci:` / `deps:` / `docs:` / `refactor:` / `perf:` / `i18n:` / `build:`';
+  const labels = computeLabels({
+    title: 'chore: housekeeping',
+    isPR: false,
+    body: `${boilerplate}\n\n### 任务类型\n\n其他杂务（chore）\n\n### 任务描述\n\n...`,
+  });
+  assert.ok(labels.includes('chore'));
+  assert.ok(!labels.includes('i18n'));
+
+  const explicit = computeLabels({ title: 'i18n: translate docs', isPR: false, body: boilerplate });
+  assert.ok(explicit.includes('i18n'));
+});
+
+test('recent regressions keep their expected label sets', () => {
+  assert.deepEqual(
+    computeLabels({
+      title: 'docs: document background wallpaper installer and new tests',
+      isPR: true,
+      files: ['README.md', 'build.sh', 'edit-backgrounds/edit-backgrounds.sh', 'tests/backgrounds.test.sh'],
+    }),
+    ['background', 'build-system', 'documentation', 'test'],
+  );
+  assert.deepEqual(
+    computeLabels({
+      title: 'fix(edit-icon): use transparent full banner for brand icons',
+      isPR: true,
+      files: ['edit-icon/README.md', 'edit-icon/files/pixmaps/ubuntu-logo-text-dark.png', 'tests/icon.test.sh'],
+    }),
+    ['bug', 'documentation', 'icon', 'test'],
+  );
+});
+
 test('NEW_LABELS covers labels the workflow may create', () => {
-  for (const name of ['triage', 'ci', 'chore', 'boot', 'build-system', 'installer', 'remove-app', 'scripts', 'i18n', 'hook', 'CONTRIBUTORS']) {
+  for (const name of [
+    'triage', 'ci', 'chore', 'boot', 'build-system', 'installer', 'remove-app',
+    'scripts', 'i18n', 'hook', 'CONTRIBUTORS', 'new-app', 'icon',
+    'background', 'host-config', 'test',
+  ]) {
     assert.ok(Object.hasOwn(NEW_LABELS, name), `missing NEW_LABELS entry: ${name}`);
   }
 });
