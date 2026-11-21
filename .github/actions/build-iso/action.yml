@@ -1,0 +1,267 @@
+name: Build ZhenTo ISO
+description: Build the UEFI-only ZhenTo ISO, verify it and split it into release volumes under 2 GB.
+
+# Reusable build action. The workflow keeps the cheap, fast checks (version
+# resolution, branding consistency) so a broken dispatch fails in seconds; this
+# action owns the expensive part: dependencies, base ISO, chroot build, verify,
+# and packaging. It is intentionally free of release logic, so the same step can
+# be reused by a nightly build, a fork, or a manual `workflow_dispatch` run.
+
+author: ZIT Studio
+
+branding:
+  icon: package
+  color: orange
+
+inputs:
+  version:
+    description: Product version; must match VERSION_ID in edit-os-release/os-release
+    required: true
+  base_iso_url:
+    description: Download URL of the official Ubuntu desktop ISO
+    required: false
+    default: https://releases.ubuntu.com/26.04/ubuntu-26.04.1-desktop-amd64.iso
+  base_iso_sha256:
+    description: Expected sha256 of the base ISO; empty disables the check
+    required: false
+    default: ""
+  squashfs_comp:
+    description: Squashfs compression passed to build.sh (zstd is much faster than xz)
+    required: false
+    default: zstd
+  squashfs_block:
+    description: Squashfs block size passed to build.sh
+    required: false
+    default: "131072"
+  volume_size:
+    description: Size of each zip volume; GitHub caps release assets at 2 GB
+    required: false
+    default: 1800m
+
+outputs:
+  iso_path:
+    description: Absolute path of the built ISO
+    value: ${{ steps.split.outputs.iso_path }}
+  iso_sha256:
+    description: sha256 of the built ISO
+    value: ${{ steps.split.outputs.iso_sha256 }}
+  dist_dir:
+    description: Directory holding the release assets (volumes + checksums)
+    value: ${{ steps.split.outputs.dist_dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install build dependencies
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          xorriso squashfs-tools rsync zip ca-certificates curl
+        xorriso -version | head -n 1
+
+    # The runner's root filesystem is small after the base ISO, the unpacked
+    # squashfs (~23 GB peak) and the repacked output are all accounted for, so
+    # pick the mount with the most free space instead of hardcoding $RUNNER_TEMP.
+    - name: Prepare build workspace
+      id: workspace
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        best=""
+        best_gb=0
+        for candidate in /mnt "$RUNNER_TEMP" "$GITHUB_WORKSPACE"; do
+          [ -d "$candidate" ] || continue
+          free_gb=$(df -Pk "$candidate" 2>/dev/null | awk 'NR==2 { print int($4 / 1024 / 1024) }')
+          printf '%-28s %s GB free\n' "$candidate" "${free_gb:-0}"
+          if [ "${free_gb:-0}" -gt "$best_gb" ]; then
+            best=$candidate
+            best_gb=$free_gb
+          fi
+        done
+
+        if [ -z "$best" ]; then
+          echo "::error::No writable build filesystem found"
+          exit 1
+        fi
+        if [ "$best_gb" -lt 25 ]; then
+          echo "::error title=Not enough disk space::Only ${best_gb} GB free on ${best}; the ISO build needs at least 25 GB"
+          exit 1
+        fi
+
+        root="$best/zhento-build"
+        if ! mkdir -p "$root/logs" 2>/dev/null; then
+          sudo mkdir -p "$root/logs"
+          sudo chown -R "$(id -u):$(id -g)" "$root"
+        fi
+
+        {
+          echo "BUILD_ROOT=$root"
+          echo "BUILD_LOGS=$root/logs"
+          echo "BASE_ISO=$root/base.iso"
+          echo "WORK_DIR=$root/work"
+          echo "OUT_DIR=$root/out"
+        } >> "$GITHUB_ENV"
+
+        echo "Building in $root (${best_gb} GB free)"
+
+    - name: Download base ISO
+      shell: bash
+      env:
+        URL: ${{ inputs.base_iso_url }}
+        SHA256: ${{ inputs.base_iso_sha256 }}
+      run: |
+        set -euo pipefail
+
+        if [ -f "$BASE_ISO" ] && [ -s "$BASE_ISO" ]; then
+          echo "Reusing $BASE_ISO"
+        else
+          echo "Downloading $URL"
+          curl -fL --retry 3 --retry-delay 5 --connect-timeout 30 \
+            --progress-bar -o "$BASE_ISO.part" "$URL"
+          mv -f "$BASE_ISO.part" "$BASE_ISO"
+        fi
+
+        if [ -n "$SHA256" ]; then
+          echo "${SHA256}  ${BASE_ISO}" | sha256sum -c -
+        else
+          echo "No sha256 supplied; skipping checksum verification"
+        fi
+
+        # A redirect to a mirror index page returns HTTP 200 with HTML. Fail here
+        # with an actionable message instead of deep inside xorriso.
+        magic=$(dd if="$BASE_ISO" bs=1 skip=32769 count=5 status=none || true)
+        if [ "$magic" != "CD001" ]; then
+          echo "::error title=Invalid base ISO::${URL} did not return an ISO 9660 image (magic: '${magic}')"
+          exit 1
+        fi
+
+        ls -lh "$BASE_ISO"
+
+    - name: Preflight check
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        SQUASHFS_COMP: ${{ inputs.squashfs_comp }}
+        SQUASHFS_BLOCK: ${{ inputs.squashfs_block }}
+      run: |
+        set -euo pipefail
+        cd "$GITHUB_WORKSPACE"
+
+        log="$BUILD_LOGS/preflight.log"
+        if ! sudo env \
+          BASE_ISO="$BASE_ISO" \
+          VERSION="$VERSION" \
+          WORK_DIR="$WORK_DIR" \
+          OUT_DIR="$OUT_DIR" \
+          SQUASHFS_COMP="$SQUASHFS_COMP" \
+          SQUASHFS_BLOCK="$SQUASHFS_BLOCK" \
+          ./build.sh --check 2>&1 | tee "$log"; then
+          reason=$(grep -E '^(XX|!!)' "$log" | tail -n 3 | tr '\n' ' ' || true)
+          echo "::error title=Preflight failed::${reason:-build.sh --check exited nonzero}"
+          exit 1
+        fi
+
+    - name: Build ISO
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        SQUASHFS_COMP: ${{ inputs.squashfs_comp }}
+        SQUASHFS_BLOCK: ${{ inputs.squashfs_block }}
+      run: |
+        set -euo pipefail
+        cd "$GITHUB_WORKSPACE"
+
+        log="$BUILD_LOGS/build.log"
+        if ! sudo env \
+          BASE_ISO="$BASE_ISO" \
+          VERSION="$VERSION" \
+          WORK_DIR="$WORK_DIR" \
+          OUT_DIR="$OUT_DIR" \
+          SQUASHFS_COMP="$SQUASHFS_COMP" \
+          SQUASHFS_BLOCK="$SQUASHFS_BLOCK" \
+          ./build.sh 2>&1 | tee "$log"; then
+          reason=$(grep -E '^(XX|!!)' "$log" | tail -n 3 | tr '\n' ' ' || true)
+          echo "::error title=ISO build failed::${reason:-build.sh exited nonzero}"
+          echo "::group::Last 120 log lines"
+          tail -n 120 "$log" || true
+          echo "::endgroup::"
+          exit 1
+        fi
+
+        iso="$OUT_DIR/zhenTo-${VERSION}-amd64.iso"
+        if [ ! -s "$iso" ]; then
+          echo "::error::build.sh finished but $iso is missing"
+          exit 1
+        fi
+        ls -lh "$iso"
+
+    - name: Verify artifact
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        cd "$GITHUB_WORKSPACE"
+        bash tests/verify-artifact.sh "$OUT_DIR/zhenTo-${VERSION}-amd64.iso" "$VERSION"
+
+    - name: Split into release volumes
+      id: split
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        VOLUME_SIZE: ${{ inputs.volume_size }}
+      run: |
+        set -euo pipefail
+
+        iso_name="zhenTo-${VERSION}-amd64.iso"
+        iso="$OUT_DIR/$iso_name"
+        dist="$BUILD_ROOT/dist"
+
+        rm -rf "$dist"
+        mkdir -p "$dist"
+        cp "$iso" "$dist/"
+        cp "$OUT_DIR/zhenTo-${VERSION}-amd64.md5" "$dist/"
+
+        # Reclaim the base ISO and the working tree before zipping: the split
+        # archive needs room for the ISO plus the volumes. build.sh normally
+        # removes work/ itself; it is root-owned, so force removal here.
+        rm -f "$BASE_ISO"
+        sudo rm -rf "$WORK_DIR"
+
+        iso_sha256=$(sha256sum "$dist/$iso_name" | cut -d' ' -f1)
+
+        (
+          cd "$dist"
+          # Release metadata for human download (unzip restores the ISO intact)
+          printf '%s  %s\n' "$iso_sha256" "$iso_name" > "${iso_name}.sha256"
+          # -0 keeps the ISO compressed at its original size; -s splits the zip
+          # into ./name.zip, ./name.z01 ... so every asset stays under 2 GB.
+          zip -q -0 -s "$VOLUME_SIZE" "${iso_name}.zip" "$iso_name"
+          rm -f "$iso_name"
+
+          shopt -s nullglob
+          volumes=("${iso_name}".z*)
+          shopt -u nullglob
+          if [ "${#volumes[@]}" -gt 0 ]; then
+            sha256sum "${volumes[@]}" "${iso_name}.zip" > SHA256SUMS
+          else
+            sha256sum "${iso_name}.zip" > SHA256SUMS
+          fi
+        )
+
+        ls -lh "$dist"
+
+        {
+          echo "iso_path=$iso"
+          echo "iso_sha256=$iso_sha256"
+          echo "dist_dir=$dist"
+        } >> "$GITHUB_OUTPUT"
+
+        {
+          echo "### ZhenTo ${VERSION}"
+          echo "- ISO sha256: \`${iso_sha256}\`"
+          echo "- release assets: $(find "$dist" -maxdepth 1 -type f | wc -l) files"
+        } >> "$GITHUB_STEP_SUMMARY"

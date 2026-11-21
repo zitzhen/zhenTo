@@ -1,28 +1,38 @@
 name: Build ISO
 
-# Triggers:
-#   - manual (workflow_dispatch), with a version and a base ISO
-#   - push of a v* tag
+# Build, verify and publish the UEFI-only ZhenTo ISO.
 #
-# Artifacts:
-#   - UEFI-only ISO, split into compressed volumes of 1800M each (well under GitHub's 2G limit)
-#   - a draft release is created automatically
+# Triggers:
+#   - workflow_dispatch: version defaults to VERSION_ID in edit-os-release/os-release
+#   - push of a v* tag:  the tag must match the branded version
+#
+# The cheap metadata job runs first so a bad version or a broken base-ISO URL
+# fails in seconds, before a 6.5 GB download and a ~30 minute chroot build.
+# The heavy lifting lives in .github/actions/build-iso so it can be reused.
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: Version number (without the leading v, e.g. 0.1.0)
-        required: true
-        default: "0.1.1"
-      base_iso_url:
-        description: Base ISO download URL
-        required: true
-        default: "https://releases.ubuntu.com/26.04/ubuntu-26.04.1-desktop-amd64.iso"
-      base_iso_sha256:
-        description: sha256 of the base ISO (leave empty to skip checksum verification)
+        description: Version to build (empty = VERSION_ID from edit-os-release/os-release)
         required: false
         default: ""
+      base_iso_url:
+        description: Base ISO download URL
+        required: false
+        default: "https://releases.ubuntu.com/26.04/ubuntu-26.04.1-desktop-amd64.iso"
+      base_iso_sha256:
+        description: sha256 of the base ISO (empty skips verification)
+        required: false
+        default: ""
+      release:
+        description: What to do with the finished build
+        type: choice
+        options:
+          - draft
+          - publish
+          - none
+        default: draft
   push:
     tags:
       - "v*"
@@ -36,13 +46,101 @@ concurrency:
 
 env:
   DEFAULT_BASE_ISO_URL: https://releases.ubuntu.com/26.04/ubuntu-26.04.1-desktop-amd64.iso
-  # Keep the original 128K block but switch to zstd: re-compressing the 6.5G rootfs with xz is too slow on CI
+  # Keep the original 128K block but switch to zstd: re-compressing the 6.5G rootfs
+  # with xz is too slow on CI.
   SQUASHFS_COMP: zstd
   SQUASHFS_BLOCK: "131072"
-  VOLUME_SIZE: 1800m
 
 jobs:
+  meta:
+    name: Resolve version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      base_url: ${{ steps.resolve.outputs.base_url }}
+      base_sha: ${{ steps.resolve.outputs.base_sha }}
+      release_mode: ${{ steps.resolve.outputs.release_mode }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Resolve version and validate branding
+        id: resolve
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_URL: ${{ inputs.base_iso_url }}
+          INPUT_SHA: ${{ inputs.base_iso_sha256 }}
+          INPUT_RELEASE: ${{ inputs.release }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          branding=$(sed -n 's/^VERSION_ID="\([^"]*\)"$/\1/p' edit-os-release/os-release)
+          if [ -z "$branding" ]; then
+            echo "::error::Cannot read VERSION_ID from edit-os-release/os-release"
+            exit 1
+          fi
+
+          version="$INPUT_VERSION"
+          if [ -z "$version" ]; then
+            case "$EVENT_NAME" in
+              push) version="${REF_NAME#v}" ;;
+              *) version="$branding" ;;
+            esac
+          fi
+
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error title=Invalid version::'$version' is not X.Y.Z (tag: '${REF_NAME}')"
+            exit 1
+          fi
+
+          # build.sh refuses to build when the requested version disagrees with
+          # the in-image branding; surface that here instead of after a 6 GB
+          # download, and point at the exact files to bump.
+          if [ "$version" != "$branding" ]; then
+            echo "::error title=Version mismatch::Requested '${version}' but edit-os-release/os-release is '${branding}'. Bump VERSION_ID in edit-os-release/os-release, VERSION in build.sh, and the tag together."
+            exit 1
+          fi
+
+          # Guards against the branding itself drifting (os-release vs build.sh).
+          bash tests/check-version-consistency.sh
+
+          base_url="${INPUT_URL:-$DEFAULT_BASE_ISO_URL}"
+          release_mode="${INPUT_RELEASE:-draft}"
+          case "$release_mode" in
+            draft | publish | none) ;;
+            *)
+              echo "::error::Unknown release mode: $release_mode"
+              exit 1
+              ;;
+          esac
+
+          {
+            echo "version=$version"
+            echo "tag=v$version"
+            echo "base_url=$base_url"
+            echo "base_sha=$INPUT_SHA"
+            echo "release_mode=$release_mode"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### ZhenTo ${version}"
+            echo ""
+            echo "- base ISO: ${base_url}"
+            echo "- sha256 pinned: $([ -n "$INPUT_SHA" ] && echo yes || echo no)"
+            echo "- release: ${release_mode}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "Building ZhenTo ${version} from ${base_url} (release: ${release_mode})"
+
   build:
+    name: Build and package
+    needs: meta
     runs-on: ubuntu-24.04
     timeout-minutes: 300
 
@@ -50,6 +148,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The base ISO, the unpacked squashfs and the repacked output peak at
+      # roughly 40 GB; stock runners only ship ~30 GB free. The action still
+      # picks the largest filesystem, so this is belt and braces.
       - name: Free disk space
         uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6 # v2.0.0
         with:
@@ -61,167 +162,37 @@ jobs:
           preinstalled-runtimes: true
           swap-storage: false
 
-      - name: Check available disk space
-        run: |
-          set -e
-          df -h
-          avail_gb=$(df -Pk . | awk 'NR==2{print int($4/1024/1024)}')
-          echo "Available space: ${avail_gb}G"
-          if [ "$avail_gb" -lt 25 ]; then
-            echo "XX Not enough disk space (needs >= 25G, peak usage is ~23G)" >&2
-            exit 1
-          fi
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            xorriso squashfs-tools rsync zip
-          xorriso -version | head -n1
-
-      - name: Compute version
-        id: meta
-        run: |
-          set -e
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            VERSION="${{ inputs.version }}"
-            BASE_URL="${{ inputs.base_iso_url }}"
-            BASE_SHA="${{ inputs.base_iso_sha256 }}"
-          else
-            VERSION="${GITHUB_REF_NAME#v}"
-            BASE_URL="${DEFAULT_BASE_ISO_URL}"
-            BASE_SHA=""
-          fi
-          [ -n "$VERSION" ] || { echo "XX Version is empty" >&2; exit 1; }
-          {
-            echo "version=${VERSION}"
-            echo "tag=v${VERSION}"
-            echo "base_url=${BASE_URL}"
-            echo "base_sha=${BASE_SHA}"
-          } >> "$GITHUB_OUTPUT"
-          echo "Version: ${VERSION}"
-
-      - name: Compute base ISO cache key
-        id: iso-key
-        env:
-          URL: ${{ steps.meta.outputs.base_url }}
-          SHA: ${{ steps.meta.outputs.base_sha }}
-        run: |
-          set -e
-          key=$(printf '%s|%s' "$URL" "$SHA" | sha256sum | cut -c1-16)
-          echo "key=base-iso-${key}" >> "$GITHUB_OUTPUT"
-
-      - name: Restore base ISO cache
-        id: iso-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Build ZhenTo ISO
+        id: build
+        uses: ./.github/actions/build-iso
         with:
-          path: ${{ runner.temp }}/cache/base.iso
-          key: ${{ steps.iso-key.outputs.key }}
+          version: ${{ needs.meta.outputs.version }}
+          base_iso_url: ${{ needs.meta.outputs.base_url }}
+          base_iso_sha256: ${{ needs.meta.outputs.base_sha }}
+          squashfs_comp: ${{ env.SQUASHFS_COMP }}
+          squashfs_block: ${{ env.SQUASHFS_BLOCK }}
 
-      - name: Download base ISO
-        env:
-          URL: ${{ steps.meta.outputs.base_url }}
-          SHA: ${{ steps.meta.outputs.base_sha }}
-          CACHE_HIT: ${{ steps.iso-cache.outputs.cache-hit }}
-        run: |
-          set -e
-          mkdir -p "$RUNNER_TEMP/cache"
-          BASE_ISO="$RUNNER_TEMP/cache/base.iso"
-          if [ "$CACHE_HIT" = "true" ] && [ -f "$BASE_ISO" ]; then
-            echo "Cache hit, skipping download"
-          else
-            curl -fL --retry 3 --retry-delay 5 -o "$BASE_ISO" "$URL"
-          fi
-          if [ -n "$SHA" ]; then
-            echo "${SHA}  ${BASE_ISO}" | sha256sum -c -
-          fi
-          ls -lh "$BASE_ISO"
-          echo "BASE_ISO=${BASE_ISO}" >> "$GITHUB_ENV"
-
-      - name: Save base ISO cache
-        if: steps.iso-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/cache/base.iso
-          key: ${{ steps.iso-key.outputs.key }}
-
-      - name: Preflight check
-        env:
-          WORK_DIR: ${{ runner.temp }}/work
-          OUT_DIR: ${{ runner.temp }}/out
-        run: |
-          sudo env \
-            BASE_ISO="${BASE_ISO}" \
-            VERSION="${{ steps.meta.outputs.version }}" \
-            WORK_DIR="${WORK_DIR}" \
-            OUT_DIR="${OUT_DIR}" \
-            SQUASHFS_COMP="${SQUASHFS_COMP}" \
-            SQUASHFS_BLOCK="${SQUASHFS_BLOCK}" \
-            ./build.sh --check
-
-      - name: Build ISO
-        env:
-          WORK_DIR: ${{ runner.temp }}/work
-          OUT_DIR: ${{ runner.temp }}/out
-        run: |
-          sudo env \
-            BASE_ISO="${BASE_ISO}" \
-            VERSION="${{ steps.meta.outputs.version }}" \
-            WORK_DIR="${WORK_DIR}" \
-            OUT_DIR="${OUT_DIR}" \
-            SQUASHFS_COMP="${SQUASHFS_COMP}" \
-            SQUASHFS_BLOCK="${SQUASHFS_BLOCK}" \
-            ./build.sh
-
-      - name: Verify artifact
-        env:
-          VERSION: ${{ steps.meta.outputs.version }}
-        run: |
-          bash tests/verify-artifact.sh \
-            "${RUNNER_TEMP}/out/zhenTo-${VERSION}-amd64.iso" "$VERSION"
-
-      - name: Split into compressed volumes
-        env:
-          VERSION: ${{ steps.meta.outputs.version }}
-        run: |
-          set -e
-          ISO_NAME="zhenTo-${VERSION}-amd64.iso"
-          mkdir -p dist
-          cp "${RUNNER_TEMP}/out/${ISO_NAME}" dist/
-          cp "${RUNNER_TEMP}/out/zhenTo-${VERSION}-amd64.md5" dist/
-
-          # The base ISO is no longer needed; free up 6G before splitting volumes
-          rm -f "${BASE_ISO}"
-
-          (
-            cd dist
-            sha256sum "${ISO_NAME}" > "${ISO_NAME}.sha256"
-            # Each volume is 1800M (1.76GiB), well under GitHub Release's 2G per-file limit
-            zip -0 -s "${VOLUME_SIZE}" "${ISO_NAME}.zip" "${ISO_NAME}"
-            rm -f "${ISO_NAME}"
-            sha256sum "${ISO_NAME}".z* "${ISO_NAME}.zip" > SHA256SUMS
-          )
-
-          ls -lh dist
-
-      - name: Create draft release
+      - name: Create release
+        if: needs.meta.outputs.release_mode != 'none'
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          tag_name: ${{ steps.meta.outputs.tag }}
-          name: ZhenTo ${{ steps.meta.outputs.version }}
-          draft: true
+          tag_name: ${{ needs.meta.outputs.tag }}
+          name: ZhenTo ${{ needs.meta.outputs.version }}
+          draft: ${{ needs.meta.outputs.release_mode == 'draft' }}
           prerelease: false
           fail_on_unmatched_files: true
-          files: dist/*
+          files: ${{ steps.build.outputs.dist_dir }}/*
           body: |
-            ZhenTo ${{ steps.meta.outputs.version }} (UEFI-only, based on Ubuntu 26.04.1 LTS)
+            ZhenTo ${{ needs.meta.outputs.version }} (UEFI-only, based on Ubuntu 26.04.1 LTS)
+
+            ISO sha256: `${{ steps.build.outputs.iso_sha256 }}`
 
             ## Files
 
-            - `zhenTo-${{ steps.meta.outputs.version }}-amd64.iso.zip` / `.z01` / `.z02` ...: compressed volumes, each under 2G
-            - `zhenTo-${{ steps.meta.outputs.version }}-amd64.iso.sha256`: sha256 of the full ISO
-            - `zhenTo-${{ steps.meta.outputs.version }}-amd64.md5`: md5 of the full ISO
+            - `zhenTo-${{ needs.meta.outputs.version }}-amd64.iso.zip` / `.z01` / `.z02` ...: compressed volumes, each under 2 GB
+            - `zhenTo-${{ needs.meta.outputs.version }}-amd64.iso.sha256`: sha256 of the full ISO
+            - `zhenTo-${{ needs.meta.outputs.version }}-amd64.md5`: md5 of the full ISO
             - `SHA256SUMS`: sha256 of each volume
 
             ## Restore the ISO
@@ -229,16 +200,17 @@ jobs:
             Download all volumes into the same directory, then run:
 
             ```bash
-            unzip zhenTo-${{ steps.meta.outputs.version }}-amd64.iso.zip
-            sha256sum -c zhenTo-${{ steps.meta.outputs.version }}-amd64.iso.sha256
+            unzip zhenTo-${{ needs.meta.outputs.version }}-amd64.iso.zip
+            sha256sum -c zhenTo-${{ needs.meta.outputs.version }}-amd64.iso.sha256
             ```
 
             ## Write to a USB drive
 
             ```bash
-            sudo dd if=zhenTo-${{ steps.meta.outputs.version }}-amd64.iso of=/dev/sdX bs=4M status=progress oflag=sync
+            sudo dd if=zhenTo-${{ needs.meta.outputs.version }}-amd64.iso of=/dev/sdX bs=4M status=progress oflag=sync
             ```
 
             UEFI boot only.
 
-            > This release is an auto-generated draft produced by GitHub Actions. Review it before publishing.
+            > This release is generated by GitHub Actions from the commit that
+            > triggered the build. Review it before publishing.

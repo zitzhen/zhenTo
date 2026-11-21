@@ -73,7 +73,10 @@ The whole image is assembled by shell scripts — the old dependency on Cubic ha
 ├── scripts/
 │   └── download-release.*    # Download all assets of a GitHub release (sh / ps1 / cmd)
 ├── tests/                    # Four-layer smoke tests (see tests/README.md)
-└── .github/                  # Issue/PR templates, CI workflows, auto-labeling
+└── .github/
+    ├── actions/build-iso/    # Reusable composite action: build + verify + package
+    ├── workflows/            # CI workflows (PR gate, ISO build, VM smoke, DCO, ...)
+    └── ISSUE_TEMPLATE/       # Issue/PR templates
 ```
 
 ## Building the ISO
@@ -199,7 +202,7 @@ See [tests/README.md](tests/README.md) for details and safety notes.
 |---|---|---|
 | `pr-check.yml` | Every pull request | Syntax checks, unit tests, version consistency, shellcheck, actionlint, gitleaks, non-root preflight |
 | `dco.yml` | Pushes and PRs | Enforces `Signed-off-by` trailers (Developer Certificate of Origin) |
-| `build-iso.yml` | `v*` tag or manual dispatch | Preflight → build → verify → split → publish a draft release |
+| `build-iso.yml` | `v*` tag or manual dispatch | Resolve version → build via `.github/actions/build-iso` → verify → split → release (draft/publish/none) |
 | `vm-smoke.yml` | `v*` tag or manual dispatch | Advisory QEMU + OVMF boot check (`continue-on-error`) |
 | `auto-label.yml` | PR activity | Automatic labeling |
 | `contributors.yml` | PR merged | Rebuild `CONTRIBUTORS` from all `Signed-off-by` trailers and label the merged PR |
@@ -207,7 +210,7 @@ See [tests/README.md](tests/README.md) for details and safety notes.
 ## Contributing
 
 1. Fork the repository and create a branch from `main`.
-2. Make your change, keeping the version consistent across `build.sh`, `edit-os-release/os-release`, and `.github/workflows/build-iso.yml`.
+2. Make your change, keeping the version consistent between `build.sh` and `edit-os-release/os-release`. The build workflow derives its version from `os-release`, so there is no third copy to keep in sync.
 3. Run the local checks above.
 4. Commit with a DCO sign-off:
 
