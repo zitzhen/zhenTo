@@ -235,7 +235,7 @@ See [tests/README.md](tests/README.md) for details and safety notes.
    git commit -s -m "feat: describe your change"
    ```
 
-   The sign-off email must match your commit author/committer email and must not be a GitHub `noreply` address. `CONTRIBUTORS` is rebuilt from these trailers automatically after each merge — do not edit it by hand.
+   The sign-off email must match your commit author/committer email and must not be a GitHub `noreply` address. `CONTRIBUTORS` is updated from these trailers automatically after each merge. New contributors are always appended at the bottom, in first-contribution order; existing entries keep their position and are never re-sorted — do not edit it by hand.
 5. Open a pull request. Choose the [English](.github/PULL_REQUEST_TEMPLATE/english.md) or [Chinese](.github/PULL_REQUEST_TEMPLATE/chinese.md) template, and make sure all required checks pass.
 
 Bug reports and feature requests are welcome via the issue templates in `.github/ISSUE_TEMPLATE/`.
